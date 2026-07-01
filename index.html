@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+<title>My people</title>
+<style>
+  body { margin: 0; font-family: 'Inter', 'Segoe UI', sans-serif; background: #F7F4EE; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+
+// ===== Local storage keys =====
+// NOTE: none of your real secrets (Apps Script URL, Sheets key, page password)
+// are written into this file. They're entered once in the browser and kept
+// only in localStorage on your own device. This means this exact file is
+// safe to commit to a public GitHub repo with nothing private inside it.
+const LS_SCRIPT_URL = "peopleapp_script_url";
+const LS_SHEETS_KEY = "peopleapp_sheets_key";
+const LS_PAGE_PASSWORD = "peopleapp_page_password";
+const LS_UNLOCKED = "peopleapp_unlocked";
+
+const FIXED_CATEGORY_COLORS = {
+  Work: "#3B6E8F",
+  Family: "#C0533E",
+  Friends: "#5C8A5C",
+  Clients: "#A07A3E",
+};
+const NEUTRAL_COLOR = "#8A8475";
+
+const FIELD_TYPES = [
+  { id: "text", label: "Text" },
+  { id: "number", label: "Number" },
+  { id: "date", label: "Date" },
+  { id: "link", label: "Link to person" },
+];
+
+function colorFor(cat) {
+  return FIXED_CATEGORY_COLORS[cat] || NEUTRAL_COLOR;
+}
+
+function layoutNodes(people, width, height) {
+  const cx = width / 2, cy = height / 2;
+  const r = Math.min(width, height) * 0.34;
+  return people.map((p, i) => {
+    const angle = (i / people.length) * Math.PI * 2 - Math.PI / 2;
+    return { ...p, x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+  });
+}
+
+function fileToDataUrl(file, cb) {
+  const reader = new FileReader();
+  reader.onload = () => cb(reader.result);
+  reader.readAsDataURL(file);
+}
+
+function calcAge(birthDate) {
+  if (!birthDate) return null;
+  const b = new Date(birthDate);
+  if (isNaN(b.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - b.getFullYear();
+  const monthDiff = now.getMonth() - b.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < b.getDate())) age--;
+  return age;
+}
+
+function formatDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+async function callBackend(scriptUrl, sheetsKey, action, params = {}) {
+  // Using GET instead of POST for most actions: Apps Script Web Apps don't
+  // reliably send CORS headers for POST requests, which makes the browser
+  // block the response before our code ever sees it. GET requests with
+  // query parameters avoid that preflight check entirely.
+  const allParams = { action, key: sheetsKey, ...params };
+  const query = Object.entries(allParams)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(typeof v === "object" ? JSON.stringify(v) : v)}`)
+    .join("&");
+  const res = await fetch(`${scriptUrl}?${query}`, { method: "GET" });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
+// Image uploads carry base64 photo data, far too large for a URL query
+// string, so this one action still uses POST. Apps Script's CORS quirk
+// mainly affects reading the *response* in strict mode, but for this app's
+// use case (same-origin trust, personal use) POST works for uploads since
+// we don't need to read back complex headers, just the JSON body.
+async function uploadImageBackend(scriptUrl, sheetsKey, params) {
+  const body = JSON.stringify({ action: "uploadImage", key: sheetsKey, ...params });
+  const res = await fetch(scriptUrl, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body,
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
+// ===== Small components =====
+function Avatar({ size, imageUrl, label, color, gradientFrom, gradientTo, onUpload, editable }) {
+  const inputRef = useRef(null);
+  const fill = gradientFrom ? `linear-gradient(135deg, ${gradientFrom} 50%, ${gradientTo} 50%)` : color;
+  return (
+    <div
+      onClick={editable ? () => inputRef.current?.click() : undefined}
+      style={{ width: size, height: size, borderRadius: "50%", background: imageUrl ? `center/cover no-repeat url(${imageUrl})` : fill, display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.36, color: "#fff", fontWeight: 600, flexShrink: 0, cursor: editable ? "pointer" : "default", position: "relative", overflow: "hidden" }}
+      title={editable ? "Tap to upload a photo" : undefined}
+    >
+      {!imageUrl && label}
+      {editable && (
+        <input ref={inputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const file = e.target.files?.[0]; if (file) fileToDataUrl(file, onUpload); }} />
+      )}
+    </div>
+  );
+}
+
+function ViewRow({ label, value }) {
+  if (!value) return null;
+  return (
+    <div style={{ padding: "12px 0", borderBottom: "1px solid #F0EDE3", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+      <div style={{ fontSize: 15, color: "#2B2722" }}>{value}</div>
+      <div style={{ fontSize: 12, color: "#9A9384" }}>{label}</div>
+    </div>
+  );
+}
+
+function EditRow({ label, value, onChange, type = "text", placeholder }) {
+  return (
+    <div style={{ padding: "10px 0", borderBottom: "1px solid #F0EDE3" }}>
+      <div style={{ fontSize: 12, color: "#9A9384", marginBottom: 4 }}>{label}</div>
+      <input type={type} value={value || ""} onChange={(e) => onChange(e.target.value)} placeholder={placeholder || "Not set"} style={{ width: "100%", fontSize: 15, color: "#2B2722", border: "none", background: "transparent", padding: 0, boxSizing: "border-box", outline: "none" }} />
+    </div>
+  );
+}
+
+// ===== Setup screen — collects your secrets once, stores only in this browser =====
+function SetupScreen({ onSaved }) {
+  const [scriptUrl, setScriptUrl] = useState("");
+  const [sheetsKey, setSheetsKey] = useState("");
+  const [pagePassword, setPagePassword] = useState("");
+
+  function save() {
+    if (!scriptUrl.trim() || !sheetsKey.trim() || !pagePassword.trim()) return;
+    localStorage.setItem(LS_SCRIPT_URL, scriptUrl.trim());
+    localStorage.setItem(LS_SHEETS_KEY, sheetsKey.trim());
+    localStorage.setItem(LS_PAGE_PASSWORD, pagePassword.trim());
+    onSaved();
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 360, background: "#fff", borderRadius: 20, padding: 28, boxShadow: "0 8px 30px rgba(0,0,0,0.08)" }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2722", marginBottom: 6 }}>One-time setup</div>
+        <div style={{ fontSize: 13, color: "#9A9384", marginBottom: 18 }}>These are stored only in this browser, never in the app's code.</div>
+
+        <div style={{ fontSize: 12, color: "#9A9384", marginBottom: 4 }}>Apps Script Web App URL</div>
+        <input value={scriptUrl} onChange={(e) => setScriptUrl(e.target.value)} placeholder="https://script.google.com/macros/s/.../exec" style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #E3DDCC", fontSize: 13, outline: "none", marginBottom: 14, boxSizing: "border-box" }} />
+
+        <div style={{ fontSize: 12, color: "#9A9384", marginBottom: 4 }}>Sheets secret key</div>
+        <input value={sheetsKey} onChange={(e) => setSheetsKey(e.target.value)} placeholder="The SECRET_KEY from your script" style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #E3DDCC", fontSize: 13, outline: "none", marginBottom: 14, boxSizing: "border-box" }} />
+
+        <div style={{ fontSize: 12, color: "#9A9384", marginBottom: 4 }}>Choose a page password</div>
+        <input value={pagePassword} onChange={(e) => setPagePassword(e.target.value)} placeholder="Anything you'll remember" style={{ width: "100%", padding: "10px 12px", borderRadius: 10, border: "1px solid #E3DDCC", fontSize: 13, outline: "none", marginBottom: 18, boxSizing: "border-box" }} />
+
+        <button onClick={save} style={{ width: "100%", border: "none", borderRadius: 12, padding: "11px 0", background: "#2B2722", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Save and continue</button>
+      </div>
+    </div>
+  );
+}
+
+function LockScreen({ pagePassword, onUnlock }) {
+  const [value, setValue] = useState("");
+  const [error, setError] = useState(false);
+
+  function submit() {
+    if (value === pagePassword) {
+      localStorage.setItem(LS_UNLOCKED, "1");
+      onUnlock();
+    } else {
+      setError(true);
+    }
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 320, background: "#fff", borderRadius: 20, padding: 28, boxShadow: "0 8px 30px rgba(0,0,0,0.08)" }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2722", marginBottom: 6, textAlign: "center" }}>My people</div>
+        <div style={{ fontSize: 13, color: "#9A9384", marginBottom: 18, textAlign: "center" }}>Enter password to continue</div>
+        <input type="password" value={value} onChange={(e) => { setValue(e.target.value); setError(false); }} onKeyDown={(e) => e.key === "Enter" && submit()} autoFocus style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: error ? "1px solid #E24B4A" : "1px solid #E3DDCC", fontSize: 15, outline: "none", boxSizing: "border-box", marginBottom: 10 }} />
+        {error && <div style={{ fontSize: 12, color: "#E24B4A", marginBottom: 10 }}>Wrong password, try again.</div>}
+        <button onClick={submit} style={{ width: "100%", border: "none", borderRadius: 12, padding: "11px 0", background: "#2B2722", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Unlock</button>
+      </div>
+    </div>
+  );
+}
+
+function LoadingScreen() {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ fontSize: 14, color: "#9A9384" }}>Loading your people...</div>
+    </div>
+  );
+}
+
+function ErrorScreen({ message, onRetry }) {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ maxWidth: 320, textAlign: "center" }}>
+        <div style={{ fontSize: 15, color: "#2B2722", fontWeight: 600, marginBottom: 8 }}>Couldn't connect</div>
+        <div style={{ fontSize: 13, color: "#9A9384", marginBottom: 16 }}>{message}</div>
+        <button onClick={onRetry} style={{ border: "1px solid #E3DDCC", borderRadius: 10, padding: "9px 18px", background: "#fff", color: "#2B2722", fontSize: 14, cursor: "pointer" }}>Try again</button>
+      </div>
+    </div>
+  );
+}
+
+// ===== Main App =====
+function MainApp({ scriptUrl, sheetsKey }) {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const [categories, setCategories] = useState([]);
+  const [categoryImages, setCategoryImages] = useState({});
+  const [people, setPeople] = useState([]);
+  const [relationships, setRelationships] = useState([]);
+  const [fieldDefs, setFieldDefs] = useState([]);
+
+  const [screen, setScreen] = useState("home");
+  const [mode, setMode] = useState("view");
+  const [activeCategory, setActiveCategory] = useState(null);
+  const [activePerson, setActivePerson] = useState(null);
+  const [search, setSearch] = useState("");
+  const [aboutOpen, setAboutOpen] = useState(false);
+
+  const [homeEditMode, setHomeEditMode] = useState(false);
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [renamingCategory, setRenamingCategory] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
+
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [addKind, setAddKind] = useState(null);
+  const [newAboutDate, setNewAboutDate] = useState("");
+  const [newAboutText, setNewAboutText] = useState("");
+  const [connectionName, setConnectionName] = useState("");
+  const [connectionType, setConnectionType] = useState("");
+  const [connectionMatchId, setConnectionMatchId] = useState(null);
+  const [newFieldLabel, setNewFieldLabel] = useState("");
+  const [newFieldType, setNewFieldType] = useState("text");
+  const [newFieldImportant, setNewFieldImportant] = useState(false);
+  const [newFieldValue, setNewFieldValue] = useState("");
+
+  async function loadData() {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await callBackend(scriptUrl, sheetsKey, "getAllData");
+      setPeople(data.people || []);
+      setRelationships(data.relationships || []);
+      setFieldDefs(data.fieldDefs || []);
+      const cats = data.categories || [];
+      setCategories(cats.map((c) => c.name));
+      const imgs = {};
+      cats.forEach((c) => { if (c.imageUrl) imgs[c.name] = c.imageUrl; });
+      setCategoryImages(imgs);
+    } catch (err) {
+      setLoadError(err.message || "Something went wrong reaching your sheet.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { loadData(); }, []);
+
+  const width = 360, height = 420;
+  const nodes = useMemo(() => layoutNodes(people, width, height), [people]);
+
+  const searchResults = useMemo(() => {
+    if (!search.trim()) return [];
+    return people.filter((p) => p.name.toLowerCase().includes(search.trim().toLowerCase()));
+  }, [search, people]);
+
+  const goPerson = (id) => {
+    setActivePerson(id);
+    setScreen("person");
+    setMode("view");
+    setAboutOpen(false);
+    closeAddFlow();
+  };
+  const goGraph = (cat) => {
+    setActiveCategory(cat);
+    setScreen("graph");
+  };
+
+  const person = people.find((p) => p.id === activePerson);
+  const personRelations = person
+    ? relationships.filter((r) => r.personA === person.id || r.personB === person.id).map((r) => {
+        const otherId = r.personA === person.id ? r.personB : r.personA;
+        return { other: people.find((p) => p.id === otherId), type: r.type };
+      }).filter((r) => r.other)
+    : [];
+  const importantFields = fieldDefs.filter((f) => f.important && person?.customValues?.[f.id]);
+  const aboutSorted = person ? [...person.about].sort((a, b) => new Date(b.date) - new Date(a.date)) : [];
+  const connectionMatches = useMemo(() => {
+    if (!connectionName.trim() || !person) return [];
+    return people.filter((p) => p.id !== person.id && p.name.toLowerCase().includes(connectionName.trim().toLowerCase()));
+  }, [connectionName, people, person]);
+
+  function updatePersonLocal(id, patch) {
+    setPeople((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  }
+  async function updatePerson(id, patch) {
+    updatePersonLocal(id, patch);
+    setSaving(true);
+    try {
+      await callBackend(scriptUrl, sheetsKey, "updatePerson", { id, ...patch });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function updateCustomValue(id, fieldId, value) {
+    setPeople((prev) => prev.map((p) => (p.id === id ? { ...p, customValues: { ...p.customValues, [fieldId]: value } } : p)));
+    setSaving(true);
+    try {
+      await callBackend(scriptUrl, sheetsKey, "setFieldValue", { personId: id, fieldId, value });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleAvatarUpload(personId, dataUrl) {
+    setSaving(true);
+    try {
+      const res = await uploadImageBackend(scriptUrl, sheetsKey, { imageData: dataUrl, fileName: `${personId}.png` });
+      updatePersonLocal(personId, { imageUrl: res.imageUrl });
+      await callBackend(scriptUrl, sheetsKey, "updatePerson", { id: personId, imageUrl: res.imageUrl });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCategoryImageUpload(cat, dataUrl) {
+    setSaving(true);
+    try {
+      const res = await uploadImageBackend(scriptUrl, sheetsKey, { imageData: dataUrl, fileName: `category-${cat}.png` });
+      setCategoryImages((prev) => ({ ...prev, [cat]: res.imageUrl }));
+      await callBackend(scriptUrl, sheetsKey, "addCategory", { name: cat, imageUrl: res.imageUrl });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function closeAddFlow() {
+    setAddMenuOpen(false);
+    setAddKind(null);
+    setNewAboutDate("");
+    setNewAboutText("");
+    setConnectionName("");
+    setConnectionType("");
+    setConnectionMatchId(null);
+    setNewFieldLabel("");
+    setNewFieldType("text");
+    setNewFieldImportant(false);
+    setNewFieldValue("");
+  }
+
+  async function submitAddAbout() {
+    if (!newAboutText.trim() || !person) return;
+    const date = newAboutDate || new Date().toISOString().slice(0, 10);
+    const entry = { date, text: newAboutText.trim() };
+    updatePersonLocal(person.id, { about: [...person.about, entry] });
+    closeAddFlow();
+    setSaving(true);
+    try {
+      await callBackend(scriptUrl, sheetsKey, "addAbout", { personId: person.id, date, text: entry.text });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitAddConnection() {
+    if (!connectionMatchId || !connectionType.trim() || !person) return;
+    const newRel = { personA: person.id, personB: connectionMatchId, type: connectionType.trim() };
+    setRelationships((prev) => [...prev, newRel]);
+    closeAddFlow();
+    setSaving(true);
+    try {
+      await callBackend(scriptUrl, sheetsKey, "addRelationship", newRel);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitAddField() {
+    if (!newFieldLabel.trim() || !person) return;
+    setSaving(true);
+    try {
+      const res = await callBackend(scriptUrl, sheetsKey, "addFieldDef", { label: newFieldLabel.trim(), type: newFieldType, important: newFieldImportant });
+      const fieldId = res.id;
+      setFieldDefs((prev) => [...prev, { id: fieldId, label: newFieldLabel.trim(), type: newFieldType, important: newFieldImportant }]);
+      if (newFieldValue.trim()) {
+        await callBackend(scriptUrl, sheetsKey, "setFieldValue", { personId: person.id, fieldId, value: newFieldValue.trim() });
+        updatePersonLocal(person.id, { customValues: { ...person.customValues, [fieldId]: newFieldValue.trim() } });
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+      closeAddFlow();
+    }
+  }
+
+  async function addCategory() {
+    const name = newCategoryName.trim();
+    if (!name || categories.includes(name)) return;
+    setCategories((prev) => [...prev, name]);
+    setNewCategoryName("");
+    setShowAddCategory(false);
+    setSaving(true);
+    try {
+      await callBackend(scriptUrl, sheetsKey, "addCategory", { name });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function renameCategory(oldName) {
+    const name = renameValue.trim();
+    if (!name || name === oldName) {
+      setRenamingCategory(null);
+      return;
+    }
+    setCategories((prev) => prev.map((c) => (c === oldName ? name : c)));
+    setPeople((prev) => prev.map((p) => ({ ...p, categories: p.categories.map((c) => (c === oldName ? name : c)) })));
+    setCategoryImages((prev) => {
+      const next = { ...prev };
+      if (next[oldName]) { next[name] = next[oldName]; delete next[oldName]; }
+      return next;
+    });
+    setRenamingCategory(null);
+    setSaving(true);
+    try {
+      await callBackend(scriptUrl, sheetsKey, "renameCategory", { oldName, newName: name });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteCategory(name) {
+    setCategories((prev) => prev.filter((c) => c !== name));
+    setPeople((prev) => prev.map((p) => ({ ...p, categories: p.categories.filter((c) => c !== name) })));
+    setCategoryImages((prev) => { const next = { ...prev }; delete next[name]; return next; });
+    setSaving(true);
+    try {
+      await callBackend(scriptUrl, sheetsKey, "deleteCategory", { name });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const sectionLabel = { fontSize: 13, fontWeight: 700, color: "#2B2722", marginTop: 18, marginBottom: 8 };
+
+  if (loading) return <LoadingScreen />;
+  if (loadError) return <ErrorScreen message={loadError} onRetry={loadData} />;
+
+  return (
+    <div style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif", background: "#F7F4EE", minHeight: "100vh", display: "flex", justifyContent: "center", padding: "20px 12px" }}>
+      <div style={{ width: "100%", maxWidth: 380, background: "#FFFFFF", borderRadius: 24, boxShadow: "0 8px 30px rgba(0,0,0,0.08)", overflow: "hidden", minHeight: 640, display: "flex", flexDirection: "column", position: "relative" }}>
+        {saving && (
+          <div style={{ position: "absolute", top: 8, right: 8, fontSize: 11, color: "#9A9384", background: "#F1EEE4", padding: "3px 8px", borderRadius: 8, zIndex: 10 }}>Saving…</div>
+        )}
+        <div style={{ padding: "16px 18px 12px", borderBottom: "1px solid #ECE7DC", display: "flex", alignItems: "center", gap: 10 }}>
+          {screen !== "home" && (
+            <button
+              onClick={() => {
+                if (screen === "person") {
+                  if (mode === "edit") { setMode("view"); closeAddFlow(); }
+                  else setScreen(activeCategory ? "graph" : "home");
+                } else setScreen("home");
+              }}
+              style={{ border: "none", background: "#F1EEE4", borderRadius: 10, width: 34, height: 34, fontSize: 16, cursor: "pointer", color: "#3A3530" }}
+              aria-label="Back"
+            >←</button>
+          )}
+          <div style={{ fontSize: 19, fontWeight: 700, color: "#2B2722", letterSpacing: 0.2, flex: 1 }}>
+            {screen === "home" && "My people"}
+            {screen === "graph" && (activeCategory || "All connections")}
+            {screen === "person" && (mode === "edit" ? "Edit" : person?.name)}
+          </div>
+          {screen === "home" && (
+            <button onClick={() => setHomeEditMode((v) => !v)} style={{ border: "none", background: "transparent", color: homeEditMode ? "#2B2722" : "#3B6E8F", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+              {homeEditMode ? "Done" : "Edit"}
+            </button>
+          )}
+          {screen === "person" && mode === "view" && (
+            <button onClick={() => setMode("edit")} style={{ border: "none", background: "transparent", color: "#3B6E8F", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Edit</button>
+          )}
+          {screen === "person" && mode === "edit" && (
+            <button onClick={() => { setMode("view"); closeAddFlow(); }} style={{ border: "none", background: "#2B2722", color: "#fff", borderRadius: 10, padding: "6px 14px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Done</button>
+          )}
+        </div>
+
+        {screen === "home" && (
+          <div style={{ padding: 18, flex: 1 }}>
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name..." style={{ width: "100%", padding: "12px 14px", borderRadius: 14, border: "1px solid #E3DDCC", fontSize: 15, marginBottom: 18, background: "#FAF8F2", outline: "none", boxSizing: "border-box" }} />
+            {search.trim() ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {searchResults.length === 0 && <div style={{ color: "#9A9384", fontSize: 14, padding: "8px 2px" }}>No one found with that name</div>}
+                {searchResults.map((p) => (
+                  <button key={p.id} onClick={() => goPerson(p.id)} style={{ textAlign: "left", padding: "10px 14px", borderRadius: 12, border: "1px solid #ECE7DC", background: "#fff", cursor: "pointer", fontSize: 15, color: "#2B2722", display: "flex", alignItems: "center", gap: 10 }}>
+                    <Avatar size={36} imageUrl={p.imageUrl} label={p.name[0]} color={colorFor(p.categories[0])} editable={false} />
+                    <div>{p.name}<div style={{ fontSize: 12, color: "#9A9384", marginTop: 2 }}>{p.categories.join(" · ")}</div></div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 8 }}>
+                  {categories.map((cat) => {
+                    const count = people.filter((p) => p.categories.includes(cat)).length;
+                    const color = colorFor(cat);
+                    const isRenaming = renamingCategory === cat;
+                    return (
+                      <div key={cat} style={{ position: "relative", border: "none", borderRadius: 20, padding: "26px 10px", background: `${color}15`, display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+                        {homeEditMode && (
+                          <button onClick={() => deleteCategory(cat)} aria-label={`Delete ${cat}`} style={{ position: "absolute", top: 6, left: 6, width: 22, height: 22, borderRadius: "50%", border: "none", background: "#E24B4A", color: "#fff", fontSize: 13, lineHeight: 1, cursor: "pointer" }}>×</button>
+                        )}
+                        <Avatar size={58} imageUrl={categoryImages[cat]} label="" color={color} editable={homeEditMode} onUpload={(dataUrl) => handleCategoryImageUpload(cat, dataUrl)} />
+                        {isRenaming ? (
+                          <input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} onKeyDown={(e) => e.key === "Enter" && renameCategory(cat)} onBlur={() => renameCategory(cat)} autoFocus style={{ width: "90%", textAlign: "center", fontSize: 14, border: "1px solid #E3DDCC", borderRadius: 8, padding: "4px 6px", outline: "none" }} />
+                        ) : (
+                          <button onClick={() => { if (homeEditMode) { setRenamingCategory(cat); setRenameValue(cat); } else goGraph(cat); }} style={{ border: "none", background: "transparent", cursor: "pointer", padding: 0 }}>
+                            <div style={{ fontSize: 15, fontWeight: 600, color: "#2B2722" }}>{cat}{homeEditMode ? " ✎" : ""}</div>
+                            <div style={{ fontSize: 12, color: "#9A9384" }}>{count} people</div>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {!showAddCategory ? (
+                    <button onClick={() => setShowAddCategory(true)} style={{ border: "1px dashed #D8D2C2", borderRadius: 20, padding: "26px 10px", background: "transparent", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                      <div style={{ width: 58, height: 58, borderRadius: "50%", border: "1px dashed #B8AF9C", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, color: "#9A9384" }}>+</div>
+                      <div style={{ fontSize: 13, color: "#7A7264" }}>New circle</div>
+                    </button>
+                  ) : (
+                    <div style={{ border: "1px solid #ECE7DC", borderRadius: 20, padding: "16px 10px", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                      <input value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCategory()} placeholder="e.g. Me" autoFocus style={{ width: "100%", textAlign: "center", fontSize: 14, border: "1px solid #E3DDCC", borderRadius: 8, padding: "6px 8px", outline: "none", boxSizing: "border-box" }} />
+                      <div style={{ display: "flex", gap: 6, width: "100%" }}>
+                        <button onClick={addCategory} style={{ flex: 1, border: "none", borderRadius: 8, padding: "6px 0", background: "#2B2722", color: "#fff", fontSize: 13, cursor: "pointer" }}>Add</button>
+                        <button onClick={() => { setShowAddCategory(false); setNewCategoryName(""); }} style={{ flex: 1, border: "1px solid #E3DDCC", borderRadius: 8, padding: "6px 0", background: "#fff", color: "#3A3530", fontSize: 13, cursor: "pointer" }}>Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {homeEditMode && <div style={{ fontSize: 12, color: "#9A9384", marginTop: 14, textAlign: "center" }}>Tap a circle's name to rename it · × deletes it (people stay in the system)</div>}
+              </>
+            )}
+          </div>
+        )}
+
+        {screen === "graph" && (
+          <div style={{ flex: 1, position: "relative" }}>
+            <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
+              <defs>
+                {nodes.filter((n) => n.categories.length > 1 && !n.imageUrl).map((n) => (
+                  <linearGradient key={n.id} id={`grad-${n.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor={colorFor(n.categories[0])} />
+                    <stop offset="50%" stopColor={colorFor(n.categories[0])} />
+                    <stop offset="50%" stopColor={colorFor(n.categories[1])} />
+                    <stop offset="100%" stopColor={colorFor(n.categories[1])} />
+                  </linearGradient>
+                ))}
+                {nodes.filter((n) => n.imageUrl).map((n) => (
+                  <clipPath key={`clip-${n.id}`} id={`clip-${n.id}`}><circle cx={n.x} cy={n.y} r={26} /></clipPath>
+                ))}
+              </defs>
+              {relationships.map((r, i) => {
+                const a = nodes.find((n) => n.id === r.personA);
+                const b = nodes.find((n) => n.id === r.personB);
+                if (!a || !b) return null;
+                const dim = activeCategory && !(a.categories.includes(activeCategory) && b.categories.includes(activeCategory));
+                return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#B8AF9C" strokeWidth={dim ? 1 : 1.6} opacity={dim ? 0.15 : 0.55} />;
+              })}
+              {nodes.map((n) => {
+                const highlighted = !activeCategory || n.categories.includes(activeCategory);
+                const r = highlighted ? 26 : 20;
+                const fill = n.imageUrl ? "transparent" : n.categories.length > 1 ? `url(#grad-${n.id})` : colorFor(n.categories[0]);
+                return (
+                  <g key={n.id} onClick={() => goPerson(n.id)} style={{ cursor: "pointer" }} opacity={highlighted ? 1 : 0.22}>
+                    <circle cx={n.x} cy={n.y} r={r} fill={fill} />
+                    {n.imageUrl && <image href={n.imageUrl} x={n.x - 26} y={n.y - 26} width={52} height={52} clipPath={`url(#clip-${n.id})`} preserveAspectRatio="xMidYMid slice" />}
+                    <text x={n.x} y={n.y + 42} textAnchor="middle" fontSize="11" fill="#2B2722" fontFamily="'Inter', sans-serif">{n.name.split(" ")[0]}</text>
+                  </g>
+                );
+              })}
+            </svg>
+            <div style={{ position: "absolute", bottom: 14, right: 14, left: 14, fontSize: 12, color: "#9A9384", textAlign: "center" }}>Tap a person to open their card</div>
+          </div>
+        )}
+
+        {screen === "person" && person && mode === "view" && (
+          <div style={{ padding: 18, flex: 1, overflowY: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
+              <Avatar size={64} imageUrl={person.imageUrl} label={person.name[0]} color={colorFor(person.categories[0])} gradientFrom={person.categories.length > 1 ? colorFor(person.categories[0]) : null} gradientTo={person.categories.length > 1 ? colorFor(person.categories[1]) : null} editable={false} />
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#2B2722" }}>{person.name}</div>
+                <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                  {person.categories.map((c) => <span key={c} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 8, background: `${colorFor(c)}20`, color: colorFor(c), fontWeight: 600 }}>{c}</span>)}
+                </div>
+              </div>
+            </div>
+            <div style={{ border: "1px solid #ECE7DC", borderRadius: 14, padding: "4px 14px", marginBottom: 8 }}>
+              <ViewRow label="Email" value={person.email} />
+              <ViewRow label="Birthday" value={person.birthDate ? `${formatDate(person.birthDate)} · age ${calcAge(person.birthDate)}` : ""} />
+            </div>
+            {importantFields.length > 0 && (
+              <div style={{ background: "#FAEEDA", borderRadius: 10, padding: "10px 12px", marginBottom: 14 }}>
+                <div style={{ fontSize: 11, color: "#854F0B", fontWeight: 700, marginBottom: 6 }}>Important details</div>
+                {importantFields.map((f) => (
+                  <div key={f.id} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                    <span style={{ fontSize: 14, color: "#2B2722" }}>{person.customValues[f.id]}</span>
+                    <span style={{ fontSize: 12, color: "#7A5A1E" }}>{f.label}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button onClick={() => setAboutOpen((v) => !v)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", border: "none", background: "transparent", padding: "10px 0", borderTop: "1px solid #ECE7DC", cursor: "pointer" }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#2B2722" }}>About</span>
+              <span style={{ fontSize: 14, color: "#9A9384", transform: aboutOpen ? "rotate(180deg)" : "none", display: "inline-block" }}>⌄</span>
+            </button>
+            {aboutOpen && (
+              <div style={{ marginBottom: 8 }}>
+                {aboutSorted.length === 0 && <div style={{ fontSize: 13, color: "#9A9384", padding: "8px 0" }}>No entries yet</div>}
+                {aboutSorted.map((entry, i) => (
+                  <div key={i} style={{ display: "flex", gap: 10, paddingBottom: 10 }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 14 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: i === 0 ? "#3B6E8F" : "#C7C2B4", marginTop: 4 }} />
+                      {i < aboutSorted.length - 1 && <div style={{ width: 1, flex: 1, background: "#ECE7DC", marginTop: 2 }} />}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 11, color: "#9A9384", marginBottom: 2 }}>{formatDate(entry.date)}</div>
+                      <div style={{ fontSize: 14, color: "#2B2722" }}>{entry.text}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ ...sectionLabel, borderTop: "1px solid #ECE7DC", paddingTop: 14 }}>Connections</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {personRelations.length === 0 && <div style={{ fontSize: 13, color: "#9A9384" }}>No connections recorded</div>}
+              {personRelations.map((r, i) => (
+                <button key={i} onClick={() => goPerson(r.other.id)} style={{ textAlign: "left", padding: "10px 12px", borderRadius: 10, border: "1px solid #ECE7DC", background: "#fff", cursor: "pointer", fontSize: 14, color: "#2B2722", display: "flex", alignItems: "center", gap: 10 }}>
+                  <Avatar size={28} imageUrl={r.other.imageUrl} label={r.other.name[0]} color={colorFor(r.other.categories[0])} editable={false} />
+                  {r.other.name}<span style={{ color: "#9A9384", fontSize: 12 }}> · {r.type}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {screen === "person" && person && mode === "edit" && (
+          <div style={{ padding: 18, flex: 1, overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
+              <Avatar size={72} imageUrl={person.imageUrl} label={person.name[0]} color={colorFor(person.categories[0])} gradientFrom={person.categories.length > 1 ? colorFor(person.categories[0]) : null} gradientTo={person.categories.length > 1 ? colorFor(person.categories[1]) : null} editable={true} onUpload={(dataUrl) => handleAvatarUpload(person.id, dataUrl)} />
+            </div>
+            <div style={{ border: "1px solid #ECE7DC", borderRadius: 14, padding: "4px 14px", marginBottom: 8 }}>
+              <EditRow label="Name" value={person.name} onChange={(v) => updatePerson(person.id, { name: v })} />
+              <EditRow label="Email" value={person.email} onChange={(v) => updatePerson(person.id, { email: v })} placeholder="Add email" />
+              <EditRow label="Birthday" value={person.birthDate} onChange={(v) => updatePerson(person.id, { birthDate: v })} type="date" />
+              {fieldDefs.map((f) => (
+                <div key={f.id} style={{ padding: "10px 0", borderBottom: "1px solid #F0EDE3" }}>
+                  <div style={{ fontSize: 12, color: "#9A9384", marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
+                    <span>{f.label}</span>{f.important && <span style={{ color: "#854F0B" }}>★ important</span>}
+                  </div>
+                  <input type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"} value={person.customValues?.[f.id] || ""} onChange={(e) => updateCustomValue(person.id, f.id, e.target.value)} placeholder={`Add ${f.label}`} style={{ width: "100%", fontSize: 15, color: "#2B2722", border: "none", background: "transparent", padding: 0, boxSizing: "border-box", outline: "none" }} />
+                </div>
+              ))}
+            </div>
+            {person.about.length > 0 && (
+              <>
+                <div style={sectionLabel}>About</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                  {aboutSorted.map((entry, i) => (
+                    <div key={i} style={{ padding: "8px 12px", background: "#FAF8F2", borderRadius: 10, fontSize: 13, color: "#3A3530" }}>
+                      <span style={{ color: "#9A9384" }}>{formatDate(entry.date)} · </span>{entry.text}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {!addMenuOpen ? (
+              <button onClick={() => setAddMenuOpen(true)} style={{ border: "1px dashed #D8D2C2", background: "transparent", borderRadius: 10, padding: "10px 12px", fontSize: 13, color: "#7A7264", cursor: "pointer", marginBottom: 20, width: "100%" }}>+ Add</button>
+            ) : !addKind ? (
+              <div style={{ border: "1px solid #ECE7DC", borderRadius: 12, padding: 12, marginBottom: 20, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontSize: 12, color: "#9A9384", marginBottom: 2 }}>What do you want to add?</div>
+                <button onClick={() => setAddKind("about")} style={{ textAlign: "left", border: "1px solid #E3DDCC", borderRadius: 10, padding: "9px 12px", background: "#fff", fontSize: 14, color: "#2B2722", cursor: "pointer" }}>About entry — a dated note</button>
+                <button onClick={() => setAddKind("connection")} style={{ textAlign: "left", border: "1px solid #E3DDCC", borderRadius: 10, padding: "9px 12px", background: "#fff", fontSize: 14, color: "#2B2722", cursor: "pointer" }}>Connection — link to another person</button>
+                <button onClick={() => setAddKind("field")} style={{ textAlign: "left", border: "1px solid #E3DDCC", borderRadius: 10, padding: "9px 12px", background: "#fff", fontSize: 14, color: "#2B2722", cursor: "pointer" }}>Custom field — available for everyone</button>
+                <button onClick={closeAddFlow} style={{ border: "none", background: "transparent", color: "#9A9384", fontSize: 13, cursor: "pointer", padding: "4px 0" }}>Cancel</button>
+              </div>
+            ) : (
+              <div style={{ border: "1px solid #ECE7DC", borderRadius: 12, padding: 12, marginBottom: 20, display: "flex", flexDirection: "column", gap: 8 }}>
+                {addKind === "about" && (
+                  <>
+                    <div style={{ fontSize: 12, color: "#9A9384" }}>Date</div>
+                    <input type="date" value={newAboutDate} onChange={(e) => setNewAboutDate(e.target.value)} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #E3DDCC", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                    <div style={{ fontSize: 12, color: "#9A9384" }}>What happened</div>
+                    <input value={newAboutText} onChange={(e) => setNewAboutText(e.target.value)} placeholder="e.g. Ran into him at the conference" autoFocus style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #E3DDCC", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={submitAddAbout} style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", background: "#2B2722", color: "#fff", fontSize: 14, cursor: "pointer" }}>Save</button>
+                      <button onClick={closeAddFlow} style={{ flex: 1, border: "1px solid #E3DDCC", borderRadius: 10, padding: "9px 0", background: "#fff", color: "#3A3530", fontSize: 14, cursor: "pointer" }}>Cancel</button>
+                    </div>
+                  </>
+                )}
+                {addKind === "connection" && (
+                  <>
+                    <div style={{ fontSize: 12, color: "#9A9384" }}>Person's name</div>
+                    <input value={connectionName} onChange={(e) => { setConnectionName(e.target.value); setConnectionMatchId(null); }} placeholder="Start typing a name..." autoFocus style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #E3DDCC", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                    {connectionName.trim() && !connectionMatchId && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        {connectionMatches.length === 0 && <div style={{ fontSize: 12, color: "#9A9384", padding: "4px 2px" }}>No match — this person must already exist</div>}
+                        {connectionMatches.map((m) => (
+                          <button key={m.id} onClick={() => { setConnectionMatchId(m.id); setConnectionName(m.name); }} style={{ textAlign: "left", border: "1px solid #E3DDCC", borderRadius: 8, padding: "7px 10px", background: "#fff", fontSize: 13, color: "#2B2722", cursor: "pointer" }}>
+                            {m.name} <span style={{ color: "#9A9384" }}>· {m.categories.join(", ")}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {connectionMatchId && (
+                      <>
+                        <div style={{ fontSize: 12, color: "#9A9384" }}>Relationship type</div>
+                        <input value={connectionType} onChange={(e) => setConnectionType(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitAddConnection()} placeholder="e.g. cousins, colleagues, child" style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #E3DDCC", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                      </>
+                    )}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={submitAddConnection} disabled={!connectionMatchId || !connectionType.trim()} style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", background: connectionMatchId && connectionType.trim() ? "#2B2722" : "#D8D2C2", color: "#fff", fontSize: 14, cursor: connectionMatchId && connectionType.trim() ? "pointer" : "default" }}>Save</button>
+                      <button onClick={closeAddFlow} style={{ flex: 1, border: "1px solid #E3DDCC", borderRadius: 10, padding: "9px 0", background: "#fff", color: "#3A3530", fontSize: 14, cursor: "pointer" }}>Cancel</button>
+                    </div>
+                  </>
+                )}
+                {addKind === "field" && (
+                  <>
+                    <input value={newFieldLabel} onChange={(e) => setNewFieldLabel(e.target.value)} placeholder="Field name (e.g. Spouse)" autoFocus style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #E3DDCC", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                    <select value={newFieldType} onChange={(e) => setNewFieldType(e.target.value)} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #E3DDCC", fontSize: 14, outline: "none", background: "#fff" }}>
+                      {FIELD_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                    </select>
+                    <input type={newFieldType === "number" ? "number" : newFieldType === "date" ? "date" : "text"} value={newFieldValue} onChange={(e) => setNewFieldValue(e.target.value)} placeholder={`${person.name}'s value for this field`} style={{ padding: "9px 12px", borderRadius: 10, border: "1px solid #E3DDCC", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#3A3530" }}>
+                      <input type="checkbox" checked={newFieldImportant} onChange={(e) => setNewFieldImportant(e.target.checked)} />
+                      Mark as important (shows on the main card)
+                    </label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={submitAddField} style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", background: "#2B2722", color: "#fff", fontSize: 14, cursor: "pointer" }}>Save</button>
+                      <button onClick={closeAddFlow} style={{ flex: 1, border: "1px solid #E3DDCC", borderRadius: 10, padding: "9px 0", background: "#fff", color: "#3A3530", fontSize: 14, cursor: "pointer" }}>Cancel</button>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#9A9384" }}>This field becomes available for every person</div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Root() {
+  const [scriptUrl, setScriptUrl] = useState(localStorage.getItem(LS_SCRIPT_URL));
+  const [sheetsKey, setSheetsKey] = useState(localStorage.getItem(LS_SHEETS_KEY));
+  const [pagePassword, setPagePassword] = useState(localStorage.getItem(LS_PAGE_PASSWORD));
+  const [unlocked, setUnlocked] = useState(localStorage.getItem(LS_UNLOCKED) === "1");
+
+  if (!scriptUrl || !sheetsKey || !pagePassword) {
+    return (
+      <SetupScreen
+        onSaved={() => {
+          setScriptUrl(localStorage.getItem(LS_SCRIPT_URL));
+          setSheetsKey(localStorage.getItem(LS_SHEETS_KEY));
+          setPagePassword(localStorage.getItem(LS_PAGE_PASSWORD));
+        }}
+      />
+    );
+  }
+  if (!unlocked) {
+    return <LockScreen pagePassword={pagePassword} onUnlock={() => setUnlocked(true)} />;
+  }
+  return <MainApp scriptUrl={scriptUrl} sheetsKey={sheetsKey} />;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+</script>
+</body>
+</html>
