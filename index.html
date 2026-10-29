@@ -320,7 +320,7 @@ function Graph({centerId,allNodes,allLinks,onNodeTap,onCenterTap,width,height,tw
         <clipPath id="avatarClip"><circle r="100%"/></clipPath>
       </defs>
       {/* Soft radial glow behind center */}
-      <circle cx={width/2} cy={height/2} r={Math.min(width,height)*0.45} fill="url(#glowGrad)" style={{pointerEvents:"none"}}/>
+      <circle cx={width/2} cy={height/2} r={Math.min(width,height)*0.4} fill="url(#glowGrad)" style={{pointerEvents:"none"}}/>
       <defs><radialGradient id="glowGrad"><stop offset="0%" stopColor="#D9C3F4" stopOpacity="0.18"/><stop offset="100%" stopColor="#D9C3F4" stopOpacity="0"/></radialGradient></defs>
       {neighborLinks.map((l,i)=>{
         const sp=positions[l.source],tp=positions[l.target];if(!sp||!tp)return null;
@@ -866,6 +866,10 @@ function MainApp(){
   const panelWidth=isDesktop&&activePerson?320:0;
   const graphWidth=dims.width-panelWidth;
   const bannerHeight=activeReminders.length>0?100:0;
+  // Bottom bar height: home has search+AI bar (~130px), non-home has add-person button (~90px)
+  const BOTTOM_BAR_H=isHome?130:90;
+  const TOP_BAR_H=isHome?0:56; // breadcrumb bar on non-home views
+  const graphHeight=dims.height-BOTTOM_BAR_H-TOP_BAR_H-bannerHeight;
 
   function onNodeTap(node){
     if(editMode){setEditSheetNode(node);return;}
@@ -951,7 +955,7 @@ function MainApp(){
       {dims.width>0&&<Graph
         centerId={centerId} allNodes={nodes} allLinks={links}
         onNodeTap={onNodeTap} onCenterTap={onCenterTap}
-        width={graphWidth||dims.width} height={dims.height}
+        width={graphWidth||dims.width} height={graphHeight||dims.height}
         twoLevel={isHome} newNodeId={newNodeId} selectedId={activeCardId}
         editMode={editMode} onEditNode={setEditSheetNode}
       />}
