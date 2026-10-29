@@ -1033,6 +1033,25 @@ function MainApp(){
             );
           })()}
 
+          {/* Unconnected people shelf */}
+          {!search&&(()=>{
+            const unconnected=nodes.filter(n=>n.type==="person"&&!links.some(l=>l.source===n.id||l.target===n.id));
+            if(unconnected.length===0)return null;
+            return(
+              <div style={{marginBottom:8,background:P.surface,border:`1.5px solid ${P.border}`,borderRadius:16,padding:"10px 14px",boxShadow:`0 2px 8px ${P.shadow}`}}>
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.1em",color:P.muted,textTransform:"uppercase",marginBottom:8}}>👤 Not connected yet</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                  {unconnected.map(n=>(
+                    <div key={n.id} onClick={()=>setActiveCardId(n.id)} style={{display:"flex",alignItems:"center",gap:6,background:P.inputBg,border:`1.5px solid ${P.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer"}}>
+                      <div style={{width:20,height:20,borderRadius:"50%",background:`${personBaseColor(n.id,links,nodes)}30`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:personBaseColor(n.id,links,nodes)}}>{n.name[0]}</div>
+                      <span style={{fontSize:13,color:P.text}}>{n.name.split(" ")[0]}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Search bar */}
           {search!==undefined&&(
             <div style={{display:"flex",alignItems:"center",gap:8,background:P.surface,border:`1.5px solid ${P.border}`,borderRadius:16,padding:"8px 14px",marginBottom:8,boxShadow:`0 1px 6px ${P.shadow}`}}>
