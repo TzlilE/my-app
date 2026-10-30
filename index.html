@@ -542,7 +542,22 @@ function PersonCard({person,allNodes,allLinks,fieldDefs,onClose,onNavigate,onUpd
         {[...draft.about].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((e,i)=><div key={i} style={{display:"flex",gap:10,paddingBottom:10,alignItems:"flex-start"}}><div style={{width:7,height:7,borderRadius:"50%",background:pColor,marginTop:5,flexShrink:0}}/><div style={{flex:1}}><div style={{fontSize:11,color:P.muted,marginBottom:2}}>{formatDate(e.date)}</div><div style={{fontSize:14,color:P.text}}>{e.text}</div></div><button onClick={()=>setDraft(d=>({...d,about:d.about.filter(x=>x!==e)}))} style={{background:"none",border:"none",color:P.muted,fontSize:16,cursor:"pointer",padding:"0 4px"}}>×</button></div>)}
         {!showAddAbout?<button onClick={()=>setShowAddAbout(true)} style={{...dashedBtn,marginBottom:12}}>+ Add about entry</button>:<div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}><input type="date" value={newAboutDate} onChange={e=>setNewAboutDate(e.target.value)} style={inp}/><input value={newAboutText} onChange={e=>setNewAboutText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addAbout()} placeholder="What happened..." autoFocus style={inp}/><div style={{display:"flex",gap:8}}><button onClick={addAbout} style={{...pbtn("primary"),flex:1}}>Save</button><button onClick={()=>setShowAddAbout(false)} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
         <div style={secLabel}>Connections</div>
-        {!showAddConn?<button onClick={()=>setShowAddConn(true)} style={{...dashedBtn,marginBottom:12}}>+ Add connection</button>:<div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}><input value={connName} onChange={e=>{setConnName(e.target.value);setConnMatchId(null);}} placeholder="Type a name..." autoFocus style={inp}/>{connMatches.map(m=><button key={m.id} onClick={()=>{setConnMatchId(m.id);setConnName(m.name);}} style={{textAlign:"left",...pbtn("secondary"),padding:"8px 12px"}}>{m.name}</button>)}{connMatchId&&<select value={connType} onChange={e=>setConnType(e.target.value)} style={{...inp,color:connType?P.text:P.muted}}><option value="" disabled>Relationship type…</option>{CONN_TYPES.map(c=><option key={c.label} value={c.label}>{c.label}</option>)}</select>}<div style={{display:"flex",gap:8}}><button onClick={()=>{if(connMatchId&&connType.trim()){onUpdate(person.id,{_newConn:{target:connMatchId,type:connType.trim()}});setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}}} disabled={!connMatchId||!connType.trim()} style={{...pbtn("primary"),flex:1,opacity:!connMatchId||!connType.trim()?0.4:1}}>Save</button><button onClick={()=>{setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
+        {!showAddConn?<button onClick={()=>setShowAddConn(true)} style={{...dashedBtn,marginBottom:12}}>+ Add connection</button>:(()=>{
+          const canCreateNew=connName.trim().length>1&&!connMatchId&&connMatches.length===0;
+          function saveConn(){if(connMatchId&&connType.trim()){onUpdate(person.id,{_newConn:{target:connMatchId,type:connType.trim()}});setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}}
+          function saveNewPerson(){if(connName.trim()&&connType.trim()){onUpdate(person.id,{_newPerson:{name:connName.trim(),connType:connType.trim()}});setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}}
+          return(<div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}>
+            <input value={connName} onChange={e=>{setConnName(e.target.value);setConnMatchId(null);}} placeholder="Type a name..." autoFocus style={inp}/>
+            {connMatches.map(m=><button key={m.id} onClick={()=>{setConnMatchId(m.id);setConnName(m.name);}} style={{textAlign:"left",...pbtn("secondary"),padding:"8px 12px"}}>{m.name}</button>)}
+            {canCreateNew&&<div style={{fontSize:12,color:P.muted,padding:"2px 4px"}}>"{connName.trim()}" not found — add as new person?</div>}
+            {(connMatchId||canCreateNew)&&<select value={connType} onChange={e=>setConnType(e.target.value)} style={{...inp,color:connType?P.text:P.muted}}><option value="" disabled>Relationship type…</option>{CONN_TYPES.map(c=><option key={c.label} value={c.label}>{c.label}</option>)}</select>}
+            <div style={{display:"flex",gap:8}}>
+              {connMatchId&&<button onClick={saveConn} disabled={!connType.trim()} style={{...pbtn("primary"),flex:1,opacity:!connType.trim()?0.4:1}}>Save</button>}
+              {canCreateNew&&<button onClick={saveNewPerson} disabled={!connType.trim()} style={{...pbtn("primary"),flex:1,opacity:!connType.trim()?0.4:1}}>+ Add & connect</button>}
+              <button onClick={()=>{setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}} style={{...pbtn("secondary"),flex:1}}>Cancel</button>
+            </div>
+          </div>);
+        })()}
         {!showDelConfirm?<button onClick={()=>setShowDelConfirm(true)} style={{...pbtn("danger"),width:"100%",textAlign:"center",marginTop:8}}>Delete person</button>:<div style={{marginTop:8,border:`1.5px solid ${P.danger}40`,borderRadius:14,padding:14}}><div style={{fontSize:14,marginBottom:12,color:P.text}}>Remove {person.name}?</div><div style={{display:"flex",gap:8}}><button onClick={()=>onDelete(person.id)} style={{...pbtn("danger"),flex:1}}>Yes, delete</button><button onClick={()=>setShowDelConfirm(false)} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
       </>)}
     </div>
@@ -1004,6 +1019,16 @@ function MainApp(){
   async function updatePerson(id,patch){
     if(patch._newConn){setLinks(prev=>[...prev,{source:id,target:patch._newConn.target,type:patch._newConn.type}]);setSaving(true);try{await callBackend("addRelationship",{personA:id,personB:patch._newConn.target,type:patch._newConn.type});}catch(e){console.error(e);}finally{setSaving(false);}return;}
     if(patch._removeDirectLink){setLinks(prev=>prev.filter(l=>!((l.source===id&&l.target==="me")||(l.target===id&&l.source==="me"))));return;}
+    if(patch._newPerson){
+      const{name,connType}=patch._newPerson;setSaving(true);
+      try{
+        const res=await callBackend("addPerson",{name,categories:[]});const newId=res.id;
+        setNodes(prev=>[...prev,{id:newId,name,type:"person",birthday:"",about:[],customValues:{},importantFieldIds:[],photo:null}]);
+        setLinks(prev=>[...prev,{source:"me",target:newId,type:"person"},{source:id,target:newId,type:connType}]);
+        await callBackend("addRelationship",{personA:id,personB:newId,type:connType});
+      }catch(e){console.error(e);}finally{setSaving(false);}
+      return;
+    }
     setNodes(prev=>prev.map(n=>n.id===id?{...n,...patch}:n));
     if(id==="me")return;
     setSaving(true);
