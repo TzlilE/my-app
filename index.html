@@ -391,7 +391,7 @@ function LockScreen({onUnlock}){
   const[val,setVal]=useState("");const[err,setErr]=useState(false);
   function submit(){if(val===APP_PASSWORD){localStorage.setItem(LS_UNLOCKED,"1");onUnlock();}else setErr(true);}
   return(
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,background:P.bg}}>
+    <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,background:P.bg}}>
       <div style={{width:"100%",maxWidth:320,background:P.surface,borderRadius:24,padding:28,boxShadow:`0 8px 30px ${P.shadow}`,border:`1.5px solid ${P.border}`}}>
         <div style={{fontSize:18,fontWeight:700,color:P.text,marginBottom:6,textAlign:"center"}}>My people</div>
         <div style={{fontSize:13,color:P.muted,marginBottom:18,textAlign:"center"}}>Enter password to continue</div>
@@ -403,8 +403,8 @@ function LockScreen({onUnlock}){
   );
 }
 
-function LoadingScreen(){return(<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:P.bg,color:P.muted,fontSize:14}}>Loading your people...</div>);}
-function ErrorScreen({message,onRetry}){return(<div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,background:P.bg}}><div style={{maxWidth:320,textAlign:"center"}}><div style={{fontSize:15,color:P.text,fontWeight:600,marginBottom:8}}>Couldn't connect</div><div style={{fontSize:13,color:P.muted,marginBottom:16}}>{message}</div><button onClick={onRetry} style={{...pbtn("secondary"),border:`1.5px solid ${P.border}`}}>Try again</button></div></div>);}
+function LoadingScreen(){return(<div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:P.bg,color:P.muted,fontSize:14}}>Loading your people...</div>);}
+function ErrorScreen({message,onRetry}){return(<div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,background:P.bg}}><div style={{maxWidth:320,textAlign:"center"}}><div style={{fontSize:15,color:P.text,fontWeight:600,marginBottom:8}}>Couldn't connect</div><div style={{fontSize:13,color:P.muted,marginBottom:16}}>{message}</div><button onClick={onRetry} style={{...pbtn("secondary"),border:`1.5px solid ${P.border}`}}>Try again</button></div></div>);}
 
 // ===== Me Card =====
 function MeCard({me,stats,onClose,onUpdate}){
@@ -968,7 +968,7 @@ function MainApp(){
   if(loadError)return <ErrorScreen message={loadError} onRetry={loadData}/>;
 
   return(
-    <div ref={containerRef} style={{width:"100%",height:"100vh",background:P.bg,color:P.text,fontFamily:"'Inter','Segoe UI',sans-serif",position:"relative",overflow:"hidden"}}>
+    <div ref={containerRef} style={{width:"100%",height:"100dvh",background:P.bg,color:P.text,fontFamily:"'Inter','Segoe UI',sans-serif",position:"relative",overflow:"hidden"}}>
       {dims.width>0&&<Graph
         centerId={centerId} allNodes={nodes} allLinks={links}
         onNodeTap={onNodeTap} onCenterTap={onCenterTap}
