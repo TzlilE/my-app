@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
 <title>My people</title>
 <style>* { box-sizing: border-box; margin: 0; padding: 0; } body { background: #F5F0EB; height: 100dvh; overflow: hidden; } #root { height: 100dvh; overflow: hidden; }</style>
 </head>
@@ -18,6 +21,7 @@ const { useState, useEffect, useRef } = React;
 const APPS_SCRIPT_URL = "%%APPS_SCRIPT_URL%%";
 const SHEETS_KEY = "%%SHEETS_KEY%%";
 const APP_PASSWORD = "%%APP_PASSWORD%%";
+const BUILD_TIME = "%%BUILD_TIME%%"; // injected at deploy — forces cache bust
 const CLAUDE_API_KEY = "%%CLAUDE_API_KEY%%";
 const LS_UNLOCKED = "peopleapp_v3_unlocked";
 const LS_DISMISSED_REMINDERS = "peopleapp_dismissed_reminders";
@@ -1045,16 +1049,6 @@ function MainApp(){
             </div>
           )}
 
-          {/* Search results */}
-          {searchResults.length>0&&(
-            <div style={{background:P.surface,border:`1.5px solid ${P.border}`,borderRadius:14,overflow:"hidden",marginBottom:10,boxShadow:`0 2px 8px ${P.shadow}`}}>
-              {searchResults.map(n=><div key={n.id} onClick={()=>{setSearch("");setActiveCardId(n.id);}} style={{padding:"11px 16px",borderBottom:`1px solid ${P.borderSoft}`,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10,color:P.text}}>
-                <div style={{width:28,height:28,borderRadius:"50%",background:`${personBaseColor(n.id,links,nodes)}25`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:personBaseColor(n.id,links,nodes)}}>{n.name[0]}</div>
-                {n.name}
-              </div>)}
-            </div>
-          )}
-
           {/* Nudge pill — show first upcoming nudge if no search */}
           {!search&&(()=>{
             // find the person with longest time since last contact
@@ -1072,15 +1066,24 @@ function MainApp(){
             );
           })()}
 
-          {/* Unconnected people shelf */}
+          {/* Uncategorized people shelf — people linked directly to "me" without a category */}
           {!search&&(()=>{
-            const unconnected=nodes.filter(n=>n.type==="person"&&!links.some(l=>l.source===n.id||l.target===n.id));
-            if(unconnected.length===0)return null;
+            const uncategorized=nodes.filter(n=>{
+              if(n.type!=="person")return false;
+              // Check if this person has a link to any category node
+              const hasCatLink=links.some(l=>{
+                const otherId=l.source===n.id?l.target:l.target===n.id?l.source:null;
+                if(!otherId)return false;
+                return nodes.find(x=>x.id===otherId)?.type==="category";
+              });
+              return !hasCatLink;
+            });
+            if(uncategorized.length===0)return null;
             return(
               <div style={{marginBottom:8,background:P.surface,border:`1.5px solid ${P.border}`,borderRadius:16,padding:"10px 14px",boxShadow:`0 2px 8px ${P.shadow}`}}>
-                <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.1em",color:P.muted,textTransform:"uppercase",marginBottom:8}}>👤 Not connected yet</div>
+                <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.1em",color:P.muted,textTransform:"uppercase",marginBottom:8}}>👤 Uncategorized</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-                  {unconnected.map(n=>(
+                  {uncategorized.map(n=>(
                     <div key={n.id} onClick={()=>setActiveCardId(n.id)} style={{display:"flex",alignItems:"center",gap:6,background:P.inputBg,border:`1.5px solid ${P.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer"}}>
                       <div style={{width:20,height:20,borderRadius:"50%",background:`${personBaseColor(n.id,links,nodes)}30`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:personBaseColor(n.id,links,nodes)}}>{n.name[0]}</div>
                       <span style={{fontSize:13,color:P.text}}>{n.name.split(" ")[0]}</span>
@@ -1091,12 +1094,23 @@ function MainApp(){
             );
           })()}
 
-          {/* Search bar */}
+          {/* Search bar + floating results */}
           {search!==undefined&&(
-            <div style={{display:"flex",alignItems:"center",gap:8,background:P.surface,border:`1.5px solid ${P.border}`,borderRadius:16,padding:"8px 14px",marginBottom:8,boxShadow:`0 1px 6px ${P.shadow}`}}>
-              <span style={{fontSize:14,color:P.muted,flexShrink:0}}>🔍</span>
-              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search people…" style={{flex:1,background:"transparent",border:"none",outline:"none",fontSize:14,color:P.text,fontFamily:"inherit"}}/>
-              {search&&<button onClick={()=>setSearch("")} style={{background:"none",border:"none",color:P.muted,fontSize:16,cursor:"pointer",padding:0,lineHeight:1}}>✕</button>}
+            <div style={{position:"relative",marginBottom:8}}>
+              {/* Floating search results — appear ABOVE the bar, don't push layout */}
+              {searchResults.length>0&&(
+                <div style={{position:"absolute",bottom:"100%",left:0,right:0,marginBottom:6,background:P.surface,border:`1.5px solid ${P.border}`,borderRadius:14,overflow:"hidden",boxShadow:`0 -4px 16px ${P.shadow}`,zIndex:20,maxHeight:240,overflowY:"auto"}}>
+                  {searchResults.map(n=><div key={n.id} onClick={()=>{setSearch("");setActiveCardId(n.id);}} style={{padding:"11px 16px",borderBottom:`1px solid ${P.borderSoft}`,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10,color:P.text,background:P.surface}}>
+                    <div style={{width:28,height:28,borderRadius:"50%",background:`${personBaseColor(n.id,links,nodes)}25`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:personBaseColor(n.id,links,nodes)}}>{n.name[0]}</div>
+                    {n.name}
+                  </div>)}
+                </div>
+              )}
+              <div style={{display:"flex",alignItems:"center",gap:8,background:P.surface,border:`1.5px solid ${search?P.selected:P.border}`,borderRadius:16,padding:"8px 14px",boxShadow:`0 1px 6px ${P.shadow}`,transition:"border-color 0.2s"}}>
+                <span style={{fontSize:14,color:P.muted,flexShrink:0}}>🔍</span>
+                <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search people…" style={{flex:1,background:"transparent",border:"none",outline:"none",fontSize:14,color:P.text,fontFamily:"inherit"}}/>
+                {search&&<button onClick={()=>setSearch("")} style={{background:"none",border:"none",color:P.muted,fontSize:16,cursor:"pointer",padding:0,lineHeight:1}}>✕</button>}
+              </div>
             </div>
           )}
           {/* AI chat bar */}
