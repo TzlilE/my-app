@@ -858,6 +858,7 @@ function MainApp(){
     setLoading(true);setLoadError(null);
     try{
       const data=await callBackend("getAllData");
+      console.log("🔍 RAW DATA from backend:", JSON.stringify({people:data.people,categories:data.categories,relationships:data.relationships}));
       const people=(data.people||[]).map(p=>({...p,about:p.about||[],customValues:p.customValues||{},importantFieldIds:p.importantFieldIds||[],photo:p.imageUrl||null}));
       const cats=(data.categories||[]).map(c=>({
         id:c.name,name:c.name,type:"category",
