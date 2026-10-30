@@ -412,8 +412,9 @@ function LoadingScreen(){return(<div style={{minHeight:"100dvh",display:"flex",a
 function ErrorScreen({message,onRetry}){return(<div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,background:P.bg}}><div style={{maxWidth:320,textAlign:"center"}}><div style={{fontSize:15,color:P.text,fontWeight:600,marginBottom:8}}>Couldn't connect</div><div style={{fontSize:13,color:P.muted,marginBottom:16}}>{message}</div><button onClick={onRetry} style={{...pbtn("secondary"),border:`1.5px solid ${P.border}`}}>Try again</button></div></div>);}
 
 // ===== Me Card =====
-function MeCard({me,stats,onClose,onUpdate}){
+function MeCard({me,stats,allNodes,onClose,onUpdate}){
   const[editing,setEditing]=useState(false);const[name,setName]=useState(me.name);
+  const debugPeople=allNodes?allNodes.filter(n=>n.type==="person").length:stats.people;
   return(
     <div style={cardBase}>
       <div style={handle}/>
@@ -426,7 +427,7 @@ function MeCard({me,stats,onClose,onUpdate}){
         <button onClick={()=>{if(editing){onUpdate("me",{name});setEditing(false);}else setEditing(true);}} style={{...pbtn(editing?"primary":"secondary"),flexShrink:0}}>{editing?"Done":"Edit"}</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
-        {[["People",stats.people],["Categories",stats.categories],["Connections",stats.connections],["Notes",stats.about]].map(([label,val])=>(
+        {[["People",debugPeople],["Categories",stats.categories],["Connections",stats.connections],["Notes",stats.about]].map(([label,val])=>(
           <div key={label} style={{background:P.inputBg,borderRadius:14,padding:"12px 14px",border:`1.5px solid ${P.border}`}}>
             <div style={{fontSize:22,fontWeight:700,color:P.btnPrimaryText}}>{val}</div>
             <div style={{fontSize:12,color:P.muted,marginTop:2}}>{label}</div>
@@ -1135,7 +1136,7 @@ function MainApp(){
         </div>
       )}
 
-      {showMeCard&&(<><div onClick={()=>setShowMeCard(false)} style={{position:"absolute",inset:0,zIndex:15}}/><MeCard me={meNode} stats={stats} onClose={()=>setShowMeCard(false)} onUpdate={updatePerson}/></>)}
+      {showMeCard&&(<><div onClick={()=>setShowMeCard(false)} style={{position:"absolute",inset:0,zIndex:15}}/><MeCard me={meNode} stats={stats} allNodes={nodes} onClose={()=>setShowMeCard(false)} onUpdate={updatePerson}/></>)}
       {activePerson&&(<>{!isDesktop&&<div onClick={()=>setActiveCardId(null)} style={{position:"absolute",inset:0,zIndex:15,background:"rgba(61,32,48,0.15)"}}/>}<PersonCard person={nodes.find(n=>n.id===activeCardId)||activePerson} allNodes={nodes} allLinks={links} fieldDefs={fieldDefs} onClose={()=>setActiveCardId(null)} onNavigate={navigateTo} onUpdate={updatePerson} onAddFieldDef={addFieldDef} onDelete={deletePerson} isSidePanel={isDesktop} saving={saving}/></>)}
       {showQuickNote&&<QuickNoteModal allNodes={nodes} onSave={saveQuickNote} onCancel={()=>setShowQuickNote(false)}/>}
       {showAIChat&&<AIChatModal allNodes={nodes} onSave={handleAISave} onCancel={()=>setShowAIChat(false)}/>}
