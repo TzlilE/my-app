@@ -366,8 +366,8 @@ function Graph({centerId,allNodes,allLinks,onNodeTap,onCenterTap,width,height,tw
             onTouchEnd={e=>{e.preventDefault();e.stopPropagation();if(editMode&&!isCenter)onEditNode(n);else if(isCenter)onCenterTap(n);else onNodeTap(n);}}>
             {isSelected&&<circle r={r+7} fill={P.selectedLight} stroke={P.selected} strokeWidth={1.5}/>}
             <Avatar node={n} r={r} color={color} isCenter={isCenter} isSelected={isSelected}/>
-            {!isL2&&<text y={r+16} textAnchor="middle" fontSize={isCenter?12:10} fontWeight={isCenter?"700":"500"} fill={P.text} style={{pointerEvents:"none",userSelect:"none"}}>{n.name.split(" ")[0]}</text>}
-            {isL2&&<text y={r+11} textAnchor="middle" fontSize={8} fill={P.muted} style={{pointerEvents:"none",userSelect:"none"}}>{n.name.split(" ")[0]}</text>}
+            {!isL2&&<text y={r+15} textAnchor="middle" fontSize={isCenter?13:10} fontWeight={isCenter?"700":"500"} fill={isCenter?P.text:P.text} style={{pointerEvents:"none",userSelect:"none"}} paintOrder="stroke" stroke={P.bg} strokeWidth={3} strokeLinejoin="round">{n.name.split(" ")[0]}</text>}
+            {isL2&&<text y={r+11} textAnchor="middle" fontSize={8} fill={P.muted} style={{pointerEvents:"none",userSelect:"none"}} paintOrder="stroke" stroke={P.bg} strokeWidth={3} strokeLinejoin="round">{n.name.split(" ")[0]}</text>}
             {/* Edit mode badge */}
             {editMode&&!isCenter&&(
               <g transform={`translate(${r*0.65},${-r*0.65})`}>
@@ -446,6 +446,7 @@ function PersonCard({person,allNodes,allLinks,fieldDefs,onClose,onNavigate,onUpd
   const[showAddField,setShowAddField]=useState(false);const[newFieldLabel,setNewFieldLabel]=useState("");const[newFieldValue,setNewFieldValue]=useState("");
   const[showDelConfirm,setShowDelConfirm]=useState(false);
   const[showAddConn,setShowAddConn]=useState(false);const[connName,setConnName]=useState("");const[connType,setConnType]=useState("");const[connMatchId,setConnMatchId]=useState(null);
+  const[catInput,setCatInput]=useState("");const[showCatDropdown,setShowCatDropdown]=useState(false);
   const touchStart=useRef(null);
   const onTouchStart=e=>{if(!isSidePanel)touchStart.current=e.touches[0].clientY;};
   const onTouchEnd=e=>{if(!isSidePanel&&touchStart.current!==null&&e.changedTouches[0].clientY-touchStart.current>80)onClose();touchStart.current=null;};
@@ -498,6 +499,42 @@ function PersonCard({person,allNodes,allLinks,fieldDefs,onClose,onNavigate,onUpd
         <button onClick={onClose} style={{...pbtn("secondary"),width:"100%",textAlign:"center"}}>Close</button>
       </>)}
       {editing&&draft&&(<>
+        {(()=>{
+          const allCats=allNodes.filter(n=>n.type==="category");
+          const currentCatIds=new Set(personCats.map(c=>c.id));
+          const filteredCats=allCats.filter(c=>!currentCatIds.has(c.id)&&(!catInput.trim()||c.name.toLowerCase().includes(catInput.toLowerCase())));
+          function assignCategory(cat){
+            // Add link in state
+            const newLink={source:person.id,target:cat.id,type:"member"};
+            onUpdate(person.id,{_newConn:{target:cat.id,type:"member"}});
+            setCatInput("");setShowCatDropdown(false);
+          }
+          return(
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,color:P.muted,marginBottom:4}}>Category</div>
+              {personCats.length>0&&(
+                <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:6}}>
+                  {personCats.map(cat=>(
+                    <span key={cat.id} style={{fontSize:12,padding:"3px 10px",borderRadius:20,background:`${categoryColorFor(cat)}20`,border:`1.5px solid ${categoryColorFor(cat)}50`,color:P.text,fontWeight:600}}>{cat.name}</span>
+                  ))}
+                </div>
+              )}
+              <div style={{position:"relative"}}>
+                <input value={catInput} onChange={e=>{setCatInput(e.target.value);setShowCatDropdown(true);}} onFocus={()=>setShowCatDropdown(true)} placeholder={personCats.length>0?"Add to another category…":"Type to assign category…"} style={inp}/>
+                {showCatDropdown&&filteredCats.length>0&&(
+                  <div style={{position:"absolute",bottom:"100%",left:0,right:0,marginBottom:4,background:P.surface,border:`1.5px solid ${P.border}`,borderRadius:14,boxShadow:`0 -4px 16px ${P.shadow}`,zIndex:50,overflow:"hidden"}}>
+                    {filteredCats.map(cat=>(
+                      <div key={cat.id} onMouseDown={e=>{e.preventDefault();assignCategory(cat);}} style={{padding:"10px 14px",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,borderBottom:`1px solid ${P.borderSoft}`,color:P.text}}>
+                        <div style={{width:12,height:12,borderRadius:"50%",background:categoryColorFor(cat),flexShrink:0}}/>
+                        {cat.name}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         <div style={{marginBottom:12}}><div style={{fontSize:11,color:P.muted,marginBottom:4}}>Birthday</div><input type="date" value={draft.birthday} onChange={e=>setDraft(d=>({...d,birthday:e.target.value}))} style={inp}/></div>
         {fieldDefs.filter(f=>draft.customValues[f.id]).length>0&&<div style={{marginBottom:12}}><div style={secLabel}>Details</div>{fieldDefs.filter(f=>draft.customValues[f.id]).map(f=><div key={f.id} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}><span style={{fontSize:11,color:P.muted}}>{f.label}</span><button onClick={()=>toggleImportant(f.id)} style={{border:"none",background:"none",cursor:"pointer",fontSize:11,color:(draft.importantFieldIds||[]).includes(f.id)?pColor:P.dim,fontFamily:"inherit"}}>{(draft.importantFieldIds||[]).includes(f.id)?"★ important":"☆ mark important"}</button></div><div style={{display:"flex",gap:6}}><input value={draft.customValues[f.id]||""} onChange={e=>setDraft(d=>({...d,customValues:{...d.customValues,[f.id]:e.target.value}}))} style={{...inp,flex:1}}/><button onClick={()=>setDraft(d=>{const cv={...d.customValues};delete cv[f.id];return{...d,customValues:cv,importantFieldIds:(d.importantFieldIds||[]).filter(x=>x!==f.id)};})} style={{...pbtn("danger"),padding:"10px 12px"}}>×</button></div></div>)}</div>}
         {!showAddField?<button onClick={()=>setShowAddField(true)} style={{...dashedBtn,marginBottom:12}}>+ Add detail</button>:<div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}><input value={newFieldLabel} onChange={e=>setNewFieldLabel(e.target.value)} placeholder="Field name" autoFocus style={inp}/><input value={newFieldValue} onChange={e=>setNewFieldValue(e.target.value)} placeholder="Value" style={inp}/><div style={{display:"flex",gap:8}}><button onClick={addCF} style={{...pbtn("primary"),flex:1}}>Save</button><button onClick={()=>setShowAddField(false)} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
@@ -508,6 +545,40 @@ function PersonCard({person,allNodes,allLinks,fieldDefs,onClose,onNavigate,onUpd
         {!showAddConn?<button onClick={()=>setShowAddConn(true)} style={{...dashedBtn,marginBottom:12}}>+ Add connection</button>:<div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}><input value={connName} onChange={e=>{setConnName(e.target.value);setConnMatchId(null);}} placeholder="Type a name..." autoFocus style={inp}/>{connMatches.map(m=><button key={m.id} onClick={()=>{setConnMatchId(m.id);setConnName(m.name);}} style={{textAlign:"left",...pbtn("secondary"),padding:"8px 12px"}}>{m.name}</button>)}{connMatchId&&<select value={connType} onChange={e=>setConnType(e.target.value)} style={{...inp,color:connType?P.text:P.muted}}><option value="" disabled>Relationship type…</option>{CONN_TYPES.map(c=><option key={c.label} value={c.label}>{c.label}</option>)}</select>}<div style={{display:"flex",gap:8}}><button onClick={()=>{if(connMatchId&&connType.trim()){onUpdate(person.id,{_newConn:{target:connMatchId,type:connType.trim()}});setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}}} disabled={!connMatchId||!connType.trim()} style={{...pbtn("primary"),flex:1,opacity:!connMatchId||!connType.trim()?0.4:1}}>Save</button><button onClick={()=>{setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
         {!showDelConfirm?<button onClick={()=>setShowDelConfirm(true)} style={{...pbtn("danger"),width:"100%",textAlign:"center",marginTop:8}}>Delete person</button>:<div style={{marginTop:8,border:`1.5px solid ${P.danger}40`,borderRadius:14,padding:14}}><div style={{fontSize:14,marginBottom:12,color:P.text}}>Remove {person.name}?</div><div style={{display:"flex",gap:8}}><button onClick={()=>onDelete(person.id)} style={{...pbtn("danger"),flex:1}}>Yes, delete</button><button onClick={()=>setShowDelConfirm(false)} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
       </>)}
+    </div>
+  );
+}
+
+// ===== Uncategorized Drawer =====
+function UncategorizedDrawer({people,allNodes,allLinks,onClose,onSelectPerson}){
+  const touchStart=useRef(null);
+  const onTouchStart=e=>{touchStart.current=e.touches[0].clientY;};
+  const onTouchEnd=e=>{if(touchStart.current!==null&&e.changedTouches[0].clientY-touchStart.current>80)onClose();touchStart.current=null;};
+  return(
+    <div style={{position:"absolute",inset:0,background:"rgba(61,32,48,0.25)",backdropFilter:"blur(4px)",zIndex:25,display:"flex",alignItems:"flex-end"}} onClick={onClose}>
+      <div style={{width:"100%",background:P.surface,borderRadius:"28px 28px 0 0",border:`1.5px solid ${P.border}`,borderBottom:"none",boxShadow:`0 -4px 24px ${P.shadow}`,paddingBottom:40,maxHeight:"70vh",display:"flex",flexDirection:"column"}} onClick={e=>e.stopPropagation()} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        <div style={{width:40,height:4,background:P.handleBar,borderRadius:2,margin:"12px auto 8px",flexShrink:0}}/>
+        <div style={{padding:"8px 22px 14px",borderBottom:`1px solid ${P.borderSoft}`,flexShrink:0}}>
+          <div style={{fontSize:16,fontWeight:700,color:P.text}}>👤 Uncategorized</div>
+          <div style={{fontSize:12,color:P.muted,marginTop:2}}>{people.length} {people.length===1?"person":"people"} not in any category</div>
+        </div>
+        <div style={{overflowY:"auto",padding:"12px 22px 0",flex:1}}>
+          {people.map(n=>{
+            const color=personBaseColor(n.id,allLinks,allNodes);
+            return(
+              <div key={n.id} onClick={()=>{onSelectPerson(n.id);onClose();}} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 0",borderBottom:`1px solid ${P.borderSoft}`,cursor:"pointer"}}>
+                <div style={{width:38,height:38,borderRadius:"50%",background:`${color}20`,border:`2px solid ${color}50`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color,flexShrink:0}}>{n.name[0]}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:15,fontWeight:600,color:P.text}}>{n.name}</div>
+                  {n.birthday&&<div style={{fontSize:11,color:P.muted,marginTop:1}}>🎂 {formatDate(n.birthday)}</div>}
+                </div>
+                <span style={{fontSize:18,color:P.muted}}>›</span>
+              </div>
+            );
+          })}
+          {people.length===0&&<div style={{textAlign:"center",padding:"24px 0",color:P.muted,fontSize:14}}>No uncategorized people 🎉</div>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -855,6 +926,7 @@ function MainApp(){
   const[editMode,setEditMode]=useState(false);
   const[editSheetNode,setEditSheetNode]=useState(null);
   const[search,setSearch]=useState("");
+  const[showUncategorized,setShowUncategorized]=useState(false);
   const[newNodeId,setNewNodeId]=useState(null);
   const[activeReminders,setActiveReminders]=useState([]);
 
@@ -901,6 +973,7 @@ function MainApp(){
   const meNode=nodes.find(n=>n.id==="me");
   const birthdays=upcomingBirthdays(nodes,30);
   const stats={people:nodes.filter(n=>n.type==="person").length,categories:nodes.filter(n=>n.type==="category").length,connections:links.filter(l=>l.type!=="circle").length,about:nodes.filter(n=>n.type==="person").reduce((s,n)=>s+(n.about?.length||0),0)};
+  const uncategorizedPeople=nodes.filter(n=>{if(n.type!=="person")return false;return !links.some(l=>{const otherId=l.source===n.id?l.target:l.target===n.id?l.source:null;return otherId&&nodes.find(x=>x.id===otherId)?.type==="category";});});
   const panelWidth=isDesktop&&activePerson?320:0;
   const graphWidth=dims.width-panelWidth;
   const bannerHeight=activeReminders.length>0?100:0;
@@ -1020,6 +1093,7 @@ function MainApp(){
         {!editMode&&centerNode?.type==="person"&&<button onClick={()=>setActiveCardId(centerNode.id)} style={{width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.muted,fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`}}>👤</button>}
         {!editMode&&<button onClick={()=>setAddModalCenter(centerNode||nodes.find(n=>n.id==="me"))} style={{width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.text,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`}}>+</button>}
         {!editMode&&isHome&&<button onClick={()=>setShowAddCategory(true)} style={{width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.muted,fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`}}>⊕</button>}
+        {!editMode&&isHome&&uncategorizedPeople.length>0&&<button onClick={()=>setShowUncategorized(true)} style={{position:"relative",width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.muted,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`}}>👤<span style={{position:"absolute",top:-5,right:-5,background:P.youStroke,color:"white",borderRadius:"50%",width:16,height:16,fontSize:9,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{uncategorizedPeople.length}</span></button>}
       </div>
 
       {/* Edit mode banner */}
@@ -1068,33 +1142,6 @@ function MainApp(){
             );
           })()}
 
-          {/* Uncategorized people shelf — people linked directly to "me" without a category */}
-          {!search&&(()=>{
-            const uncategorized=nodes.filter(n=>{
-              if(n.type!=="person")return false;
-              // Check if this person has a link to any category node
-              const hasCatLink=links.some(l=>{
-                const otherId=l.source===n.id?l.target:l.target===n.id?l.source:null;
-                if(!otherId)return false;
-                return nodes.find(x=>x.id===otherId)?.type==="category";
-              });
-              return !hasCatLink;
-            });
-            if(uncategorized.length===0)return null;
-            return(
-              <div style={{marginBottom:8,background:P.surface,border:`1.5px solid ${P.border}`,borderRadius:16,padding:"10px 14px",boxShadow:`0 2px 8px ${P.shadow}`}}>
-                <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.1em",color:P.muted,textTransform:"uppercase",marginBottom:8}}>👤 Uncategorized</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-                  {uncategorized.map(n=>(
-                    <div key={n.id} onClick={()=>setActiveCardId(n.id)} style={{display:"flex",alignItems:"center",gap:6,background:P.inputBg,border:`1.5px solid ${P.border}`,borderRadius:20,padding:"5px 12px",cursor:"pointer"}}>
-                      <div style={{width:20,height:20,borderRadius:"50%",background:`${personBaseColor(n.id,links,nodes)}30`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:personBaseColor(n.id,links,nodes)}}>{n.name[0]}</div>
-                      <span style={{fontSize:13,color:P.text}}>{n.name.split(" ")[0]}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
 
           {/* Search bar + floating results */}
           {search!==undefined&&(
@@ -1136,6 +1183,7 @@ function MainApp(){
         </div>
       )}
 
+      {showUncategorized&&<UncategorizedDrawer people={uncategorizedPeople} allNodes={nodes} allLinks={links} onClose={()=>setShowUncategorized(false)} onSelectPerson={id=>{setActiveCardId(id);}}/>}
       {showMeCard&&(<><div onClick={()=>setShowMeCard(false)} style={{position:"absolute",inset:0,zIndex:15}}/><MeCard me={meNode} stats={stats} allNodes={nodes} onClose={()=>setShowMeCard(false)} onUpdate={updatePerson}/></>)}
       {activePerson&&(<>{!isDesktop&&<div onClick={()=>setActiveCardId(null)} style={{position:"absolute",inset:0,zIndex:15,background:"rgba(61,32,48,0.15)"}}/>}<PersonCard person={nodes.find(n=>n.id===activeCardId)||activePerson} allNodes={nodes} allLinks={links} fieldDefs={fieldDefs} onClose={()=>setActiveCardId(null)} onNavigate={navigateTo} onUpdate={updatePerson} onAddFieldDef={addFieldDef} onDelete={deletePerson} isSidePanel={isDesktop} saving={saving}/></>)}
       {showQuickNote&&<QuickNoteModal allNodes={nodes} onSave={saveQuickNote} onCancel={()=>setShowQuickNote(false)}/>}
