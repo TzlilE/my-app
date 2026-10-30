@@ -906,7 +906,9 @@ function MainApp(){
 
   function onNodeTap(node){
     if(editMode){setEditSheetNode(node);return;}
-    setNavStack(s=>[...s,centerId]);setCenterId(node.id);setActiveCardId(null);setShowMeCard(false);
+    setNavStack(s=>[...s,centerId]);setCenterId(node.id);setShowMeCard(false);
+    // open card immediately if tapping a person
+    if(node.type==="person"){setActiveCardId(node.id);}else{setActiveCardId(null);}
   }
   function onCenterTap(node){if(node.id==="me"){setShowMeCard(true);return;}if(node.type==="person"){setActiveCardId(node.id);}}
   function navigateTo(nodeId){setNavStack(s=>[...s,centerId]);setCenterId(nodeId);setActiveCardId(null);setShowMeCard(false);}
