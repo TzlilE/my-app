@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
+<title>My people</title>
+<style>* { box-sizing: border-box; margin: 0; padding: 0; } body { background: #F5F0EB; height: 100dvh; overflow: hidden; } #root { height: 100dvh; overflow: hidden; }</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+// ===== Config — injected by GitHub Actions =====
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwKcq_u9FLN9zQg-e9BP0ifDvD03_KUaTO0YlZs5iQgoCW5UZreocCRYhFC9EA_7sF2/exec";
+const SHEETS_KEY = "Dem0of198NQlio";
+const APP_PASSWORD = "1469";
+const BUILD_TIME = "2026-10-30T14:00:47Z"; // injected at deploy — forces cache bust
+const CLAUDE_API_KEY = "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";
+const LS_UNLOCKED = "peopleapp_v3_unlocked";
+const LS_DISMISSED_REMINDERS = "peopleapp_dismissed_reminders";
+
+// ===== Backend =====
+async function callBackend(action, params={}) {
+  const all={action,key:SHEETS_KEY,...params};
+  const query=Object.entries(all).map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(typeof v==="object"?JSON.stringify(v):v)}`).join("&");
+  const res=await fetch(`${APPS_SCRIPT_URL}?${query}`,{method:"GET"});
+  const data=await res.json();
+  if(data.error)throw new Error(data.error);
+  return data;
+}
+async function uploadImageBackend(params){
+  const res=await fetch(APPS_SCRIPT_URL,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({action:"uploadImage",key:SHEETS_KEY,...params})});
+  const data=await res.json();
+  if(data.error)throw new Error(data.error);
+  return data;
+}
+
+// ===== Design Palette =====
+const P = {
+  bg:          "#F5F0EB",
+  surface:     "#FFFFFF",
+  surfaceAlt:  "#FAF6EB",
+  border:      "#EEDCBD",
+  borderSoft:  "#F0E8D8",
+  text:        "#3D2030",
+  muted:       "#C898A8",
+  dim:         "#D8C0C8",
+  youFill:     "#FAE0E0",
+  youStroke:   "#EDB8B8",
+  youText:     "#B86060",
+  nudgeBg:     "#FFFFFF",
+  nudgeBorder: "#F0D8D8",
+  nudgeDot:    "#F39393",
+  aiBarBg:     "#FFFFFF",
+  aiBarBorder: "#E0D0F0",
+  aiIcon1:     "#D9C3F4",
+  aiIcon2:     "#FAE0E0",
+  aiMicBg:     "#FAE0E0",
+  aiMicText:   "#C88080",
+  shadow:      "rgba(61,32,48,0.10)",
+  gradBot:     "rgba(245,240,235,0.97)",
+  gradTop:     "rgba(245,240,235,0.95)",
+  handleBar:   "rgba(61,32,48,0.12)",
+  btnPrimary:  "#D9C3F4",
+  btnPrimaryText: "#5A2A90",
+  btnSecBg:    "#F5F0EB",
+  btnSecText:  "#3D2030",
+  danger:      "#F39393",
+  dangerLight: "#FBD0D0",
+  link:        "#B27CDB",
+  inputBg:     "#FAF6EB",
+  selected:    "#B27CDB",
+  selectedLight:"#D9C3F433",
+};
+
+// Relationship types with line colors
+const CONN_TYPES = [
+  {label:"Friend",    color:"#B27CDB"},
+  {label:"Spouse",    color:"#F39393"},
+  {label:"Partner",   color:"#EBA076"},
+  {label:"Child",     color:"#B9D4EC"},
+  {label:"Parent",    color:"#EBA076"},
+  {label:"Sibling",   color:"#90C29E"},
+  {label:"Colleague", color:"#F5D982"},
+];
+function connColor(type){
+  if(!type)return null;
+  const t=CONN_TYPES.find(c=>c.label.toLowerCase()===type.toLowerCase());
+  return t?t.color:null;
+}
+
+// 16-color palette swatches for category picker
+const CAT_PALETTE = [
+  "#B9D4EC","#B27CDB","#D9C3F4","#F39393",
+  "#FBD0D0","#D9AA48","#F5D982","#90C29E",
+  "#C8E6D1","#EBA076","#FFD5BF","#FAF6EB",
+  "#FAF3E1","#EEDCBD","#D6AA44","#BD9CE2"
+];
+
+// Stroke variants for swatches (slightly darker)
+const CAT_PALETTE_STROKE = [
+  "#90B8E0","#9050C0","#B8A0E0","#D06060",
+  "#E09898","#B08020","#C8A830","#60A070",
+  "#90C29E","#C07040","#E0A070","#E0D090",
+  "#D8C060","#C8A870","#A07820","#9060C0"
+];
+
+// Default category colors map
+const DEFAULT_CAT_COLORS = {
+  Friends:"#D9C3F4", Family:"#FBD0D0", Work:"#C8E6D1",
+  Clients:"#B9D4EC", Personal:"#FFD5BF", Health:"#C8E6D1",
+  Community:"#BD9CE2", School:"#F5D982"
+};
+
+function hashColor(id) {
+  let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))&0xFFFFFF;
+  return CAT_PALETTE[Math.abs(h)%CAT_PALETTE.length];
+}
+// Luminance-based text color: dark text on light bg, white on dark/saturated bg
+function textOnColor(hex) {
+  if(!hex||hex[0]!=="#") return P.text;
+  const r=parseInt(hex.slice(1,3),16)/255;
+  const g=parseInt(hex.slice(3,5),16)/255;
+  const b=parseInt(hex.slice(5,7),16)/255;
+  const toLinear=c=>c<=0.04045?c/12.92:Math.pow((c+0.055)/1.055,2.4);
+  const L=0.2126*toLinear(r)+0.7152*toLinear(g)+0.0722*toLinear(b);
+  return L>0.38?"rgba(61,32,48,0.82)":"rgba(255,255,255,0.92)";
+}
+
+// ===== Helpers =====
+function calcAge(b){if(!b)return null;const bd=new Date(b);if(isNaN(bd.getTime()))return null;const now=new Date();let age=now.getFullYear()-bd.getFullYear();if(now.getMonth()-bd.getMonth()<0||(now.getMonth()===bd.getMonth()&&now.getDate()<bd.getDate()))age--;return age;}
+function formatDate(iso){if(!iso)return"";const d=new Date(iso);if(isNaN(d.getTime()))return iso;return d.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});}
+function daysSinceLastAbout(node){if(!node.about?.length)return null;const latest=node.about.reduce((a,b)=>new Date(a.date)>new Date(b.date)?a:b);return Math.floor((Date.now()-new Date(latest.date))/86400000);}
+function upcomingBirthdays(nodes,withinDays=30){const now=new Date();return nodes.filter(n=>n.type==="person"&&n.birthday).map(n=>{const b=new Date(n.birthday);if(isNaN(b.getTime()))return null;let next=new Date(now.getFullYear(),b.getMonth(),b.getDate());if(next<now)next=new Date(now.getFullYear()+1,b.getMonth(),b.getDate());const daysUntil=Math.round((next-now)/86400000);return daysUntil<=withinDays?{node:n,daysUntil}:null;}).filter(Boolean).sort((a,b)=>a.daysUntil-b.daysUntil);}
+
+function categoryColorFor(cat) {
+  if(cat?.color) return cat.color;
+  return DEFAULT_CAT_COLORS[cat?.name] || hashColor(cat?.id || "x");
+}
+function personBaseColor(nodeId, allLinks, allNodes) {
+  // find the first category link for this person
+  const cl = allLinks.find(l => {
+    const catId = l.source===nodeId?l.target:l.target===nodeId?l.source:null;
+    return catId && allNodes.find(n=>n.id===catId)?.type==="category";
+  });
+  if(cl) {
+    const catId = cl.source===nodeId?cl.target:cl.source;
+    const cat = allNodes.find(n=>n.id===catId);
+    return categoryColorFor(cat);
+  }
+  return hashColor(nodeId);
+}
+function nodeMainColor(node, allLinks, allNodes) {
+  if(node.id==="me") return P.youFill;
+  if(node.type==="category") return categoryColorFor(node);
+  return personBaseColor(node.id, allLinks, allNodes);
+}
+
+// ===== Obsidian-style node radius =====
+function getNodeRadius(node, centerId, isL2, allLinks) {
+  if(node.id===centerId) return 36;
+  if(isL2) return 10;
+  if(node.type==="category") return 26;
+  if(node.type!=="person") return 14;
+  const connCount = allLinks ? allLinks.filter(l=>(l.source===node.id||l.target===node.id)&&l.type!=="circle").length : 0;
+  const aboutCount = node.about ? node.about.length : 0;
+  const days = daysSinceLastAbout(node);
+  const recencyBonus = days===null ? 0 : days<7 ? 4 : days<30 ? 2 : days<90 ? 1 : 0;
+  const radius = 12 + Math.min(connCount*2,8) + Math.min(aboutCount*1.5,8) + recencyBonus;
+  return Math.min(Math.round(radius), 28);
+}
+
+// ===== Smart Reminders =====
+function getReminders(nodes, fieldDefs) {
+  const now = new Date();
+  const reminders = [];
+  nodes.filter(n=>n.type==="person"&&n.birthday).forEach(n=>{
+    const b = new Date(n.birthday); if(isNaN(b.getTime())) return;
+    let next = new Date(now.getFullYear(), b.getMonth(), b.getDate());
+    if(next<now) next = new Date(now.getFullYear()+1, b.getMonth(), b.getDate());
+    const daysUntil = Math.round((next-now)/86400000);
+    if(daysUntil<=7) reminders.push({
+      id:`bday_${n.id}_${next.getFullYear()}`, personId:n.id, personName:n.name,
+      type:"birthday", emoji:"🎂",
+      label:daysUntil===0?`${n.name.split(" ")[0]}'s birthday is TODAY!`:daysUntil===1?`${n.name.split(" ")[0]}'s birthday is tomorrow`:`${n.name.split(" ")[0]}'s birthday in ${daysUntil} days`,
+      daysUntil,
+    });
+  });
+  if(fieldDefs) {
+    nodes.filter(n=>n.type==="person").forEach(n=>{
+      (n.importantFieldIds||[]).forEach(fid=>{
+        const fd = fieldDefs.find(f=>f.id===fid); if(!fd) return;
+        const val = n.customValues?.[fid]; if(!val) return;
+        const dateVal = new Date(val); if(isNaN(dateVal.getTime())) return;
+        let nextOccurrence = new Date(now.getFullYear(), dateVal.getMonth(), dateVal.getDate());
+        if(nextOccurrence<now) nextOccurrence = new Date(now.getFullYear()+1, dateVal.getMonth(), dateVal.getDate());
+        const daysUntil = Math.round((nextOccurrence-now)/86400000);
+        if(daysUntil<=3) reminders.push({
+          id:`field_${n.id}_${fid}_${nextOccurrence.getFullYear()}`, personId:n.id, personName:n.name,
+          type:"custom", emoji:"📅",
+          label:daysUntil===0?`${fd.label} for ${n.name.split(" ")[0]} — TODAY`:`${fd.label} for ${n.name.split(" ")[0]} in ${daysUntil} day${daysUntil===1?"":"s"}`,
+          daysUntil,
+        });
+      });
+    });
+  }
+  return reminders.sort((a,b)=>a.daysUntil-b.daysUntil);
+}
+function getDismissedReminders(){try{return JSON.parse(localStorage.getItem(LS_DISMISSED_REMINDERS)||"{}");}catch(e){return{};}}
+function dismissReminder(id){try{const d=getDismissedReminders();d[id]=new Date().toISOString().slice(0,10);localStorage.setItem(LS_DISMISSED_REMINDERS,JSON.stringify(d));}catch(e){}}
+function snoozeReminder(id){try{const d=getDismissedReminders();const tomorrow=new Date();tomorrow.setDate(tomorrow.getDate()+1);d[id]="snooze_"+tomorrow.toISOString().slice(0,10);localStorage.setItem(LS_DISMISSED_REMINDERS,JSON.stringify(d));}catch(e){}}
+function isReminderActive(reminder){const d=getDismissedReminders();const val=d[reminder.id];if(!val)return true;if(val.startsWith("snooze_")){const until=val.replace("snooze_","");return new Date().toISOString().slice(0,10)>=until;}return val!==new Date().toISOString().slice(0,10);}
+
+// ===== Reminder Banner =====
+function ReminderBanner({reminders,onDismiss,onSnooze,onPersonClick}){
+  const[index,setIndex]=useState(0);
+  if(!reminders||reminders.length===0) return null;
+  const r=reminders[index]||reminders[0];
+  return(
+    <div style={{position:"absolute",top:0,left:0,right:0,zIndex:40,background:r.type==="birthday"?`linear-gradient(135deg,#D9C3F4ee,#FAE0E0ee)`:`linear-gradient(135deg,#C8E6D1ee,#D9C3F4ee)`,borderBottom:`1px solid ${P.border}`,boxShadow:`0 4px 16px ${P.shadow}`,padding:"12px 16px",animation:"slideDown 0.3s ease-out"}}>
+      <style>{`@keyframes slideDown{from{transform:translateY(-100%);opacity:0}to{transform:translateY(0);opacity:1}}`}</style>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:20,flexShrink:0}}>{r.emoji}</span>
+        <div style={{flex:1}}>
+          <div style={{fontSize:14,fontWeight:600,color:P.text,cursor:"pointer"}} onClick={()=>onPersonClick(r.personId)}>{r.label}</div>
+          {reminders.length>1&&<div style={{fontSize:11,color:P.muted,marginTop:2}}>{reminders.length} reminders — {index+1} of {reminders.length}</div>}
+        </div>
+        {reminders.length>1&&<button onClick={()=>setIndex(i=>(i+1)%reminders.length)} style={{background:"rgba(255,255,255,0.4)",border:"none",borderRadius:8,padding:"4px 8px",color:P.text,cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>Next</button>}
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:10}}>
+        {r.daysUntil>0&&<button onClick={()=>onSnooze(r.id)} style={{flex:1,padding:"7px 0",background:"rgba(255,255,255,0.3)",border:`1px solid rgba(255,255,255,0.4)`,borderRadius:10,color:P.text,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Remind me day-of</button>}
+        <button onClick={()=>onDismiss(r.id)} style={{flex:1,padding:"7px 0",background:"rgba(255,255,255,0.5)",border:`1px solid rgba(255,255,255,0.4)`,borderRadius:10,color:P.text,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Dismiss</button>
+      </div>
+    </div>
+  );
+}
+
+function getNeighborGraph(centerId,allNodes,allLinks){const nIds=new Set([centerId]);const nLinks=[];allLinks.forEach(l=>{if(l.source===centerId){nIds.add(l.target);nLinks.push(l);}if(l.target===centerId){nIds.add(l.source);nLinks.push(l);}});return{neighborNodes:allNodes.filter(n=>nIds.has(n.id)),neighborLinks:nLinks,secondLevelIds:new Set()};}
+function getTwoLevelGraph(centerId,allNodes,allLinks){const l1=new Set([centerId]);const l2=new Set();const used=[];allLinks.forEach(l=>{if(l.source===centerId){l1.add(l.target);used.push(l);}if(l.target===centerId){l1.add(l.source);used.push(l);}});allLinks.forEach(l=>{const inL1s=l1.has(l.source)&&l.source!==centerId;const inL1t=l1.has(l.target)&&l.target!==centerId;if(inL1s&&!l1.has(l.target)){l2.add(l.target);if(!used.includes(l))used.push(l);}if(inL1t&&!l1.has(l.source)){l2.add(l.source);if(!used.includes(l))used.push(l);}});const all=new Set([...l1,...l2]);return{neighborNodes:allNodes.filter(n=>all.has(n.id)),neighborLinks:used,secondLevelIds:l2};}
+
+// ===== Layout =====
+function computeLayout(centerId,allNodes,allLinks,width,height,twoLevel,prevPositions){
+  const{neighborNodes,neighborLinks,secondLevelIds}=twoLevel?getTwoLevelGraph(centerId,allNodes,allLinks):getNeighborGraph(centerId,allNodes,allLinks);
+  const pos={},vel={};
+  const cx=width/2,cy=height/2;
+  const pad=60;
+  neighborNodes.forEach(n=>{
+    if(n.id===centerId){pos[n.id]={x:cx,y:cy};}
+    else if(prevPositions&&prevPositions[n.id]){pos[n.id]={...prevPositions[n.id]};}
+    else{const angle=Math.random()*Math.PI*2;const dist=80+Math.random()*(Math.min(width,height)*0.38);pos[n.id]={x:Math.max(pad,Math.min(width-pad,cx+Math.cos(angle)*dist)),y:Math.max(pad+40,Math.min(height-pad-100,cy+Math.sin(angle)*dist))};}
+    vel[n.id]={vx:0,vy:0};
+  });
+  const ids=neighborNodes.map(n=>n.id);
+  const startPos={};ids.forEach(id=>{startPos[id]={...pos[id]};});
+  for(let step=0;step<400;step++){
+    const alpha=Math.pow(0.97,step);if(alpha<0.004)break;
+    const f={};ids.forEach(id=>{f[id]={fx:0,fy:0};});
+    for(let i=0;i<ids.length;i++)for(let j=i+1;j<ids.length;j++){
+      const a=ids[i],b=ids[j];if(!pos[a]||!pos[b])continue;
+      const dx=pos[b].x-pos[a].x,dy=pos[b].y-pos[a].y;
+      const dist=Math.sqrt(dx*dx+dy*dy)||1;const force=(2400*alpha)/(dist*dist);
+      f[a].fx-=(dx/dist)*force;f[a].fy-=(dy/dist)*force;f[b].fx+=(dx/dist)*force;f[b].fy+=(dy/dist)*force;
+    }
+    neighborLinks.forEach(l=>{
+      const a=l.source,b=l.target;if(!pos[a]||!pos[b])return;
+      const targetDist=Math.min(width,height)*0.28;
+      const dx=pos[b].x-pos[a].x,dy=pos[b].y-pos[a].y;
+      const dist=Math.sqrt(dx*dx+dy*dy)||1;const force=(dist-targetDist)*0.018*alpha;
+      const fx=(dx/dist)*force,fy=(dy/dist)*force;
+      if(a!==centerId){f[a].fx+=fx;f[a].fy+=fy;}if(b!==centerId){f[b].fx-=fx;f[b].fy-=fy;}
+    });
+    ids.forEach(id=>{
+      if(id===centerId||!pos[id])return;
+      f[id].fx+=(cx-pos[id].x)*0.004*alpha;f[id].fy+=(cy-pos[id].y)*0.004*alpha;
+      vel[id].vx=(vel[id].vx+f[id].fx)*0.85;vel[id].vy=(vel[id].vy+f[id].fy)*0.85;
+      pos[id]={x:Math.max(pad,Math.min(width-pad,pos[id].x+vel[id].vx)),y:Math.max(pad+40,Math.min(height-pad-100,pos[id].y+vel[id].vy))};
+    });
+  }
+  return{finalPos:pos,startPos,neighborNodes,neighborLinks,secondLevelIds};
+}
+
+function useAnimatedLayout(centerId,allNodes,allLinks,width,height,twoLevel,newNodeId){
+  const[positions,setPositions]=useState({});
+  const frameRef=useRef(null);
+  const[pulseScale,setPulseScale]=useState({});
+  const prevPosRef=useRef({});
+  useEffect(()=>{
+    if(!width||!height)return;
+    const{finalPos,startPos,neighborNodes}=computeLayout(centerId,allNodes,allLinks,width,height,twoLevel,prevPosRef.current);
+    const ids=neighborNodes.map(n=>n.id);
+    const duration=600;const start=performance.now();
+    function easeInOut(t){return t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;}
+    function animate(now){
+      const t=Math.min(1,(now-start)/duration);const e=easeInOut(t);const interp={};
+      ids.forEach(id=>{if(!startPos[id]||!finalPos[id]){interp[id]=finalPos[id];return;}interp[id]={x:startPos[id].x+(finalPos[id].x-startPos[id].x)*e,y:startPos[id].y+(finalPos[id].y-startPos[id].y)*e};});
+      setPositions(interp);if(t<1){frameRef.current=requestAnimationFrame(animate);}else{prevPosRef.current=finalPos;}
+    }
+    if(frameRef.current)cancelAnimationFrame(frameRef.current);
+    frameRef.current=requestAnimationFrame(animate);
+    return()=>{if(frameRef.current)cancelAnimationFrame(frameRef.current);};
+  },[centerId,width,height,twoLevel]);
+  useEffect(()=>{
+    if(!newNodeId)return;
+    let t=0;const iv=setInterval(()=>{t+=0.15;const scale=1+0.3*Math.sin(t)*Math.max(0,1-t/(Math.PI*3));setPulseScale(s=>({...s,[newNodeId]:scale}));if(t>Math.PI*3){setPulseScale(s=>({...s,[newNodeId]:1}));clearInterval(iv);}},30);
+    return()=>clearInterval(iv);
+  },[newNodeId]);
+  return{positions,pulseScale};
+}
+
+// ===== Graph =====
+function Avatar({node,r,color,isCenter,isSelected}){
+  const initial=node?.name?.[0]||"?";
+  return(
+    <g>
+      <circle r={r+1} fill="transparent" style={{filter:`drop-shadow(0 2px 6px ${P.shadow})`}}/>
+      <circle r={r+2} fill={P.surface}/>
+      {(isSelected||isCenter)&&<circle r={r+4} fill="transparent" stroke={isCenter?P.youStroke:P.selected} strokeWidth={isCenter?2:2.5}/>}
+      {node?.photo
+        ?<image href={node.photo} x={-r} y={-r} width={r*2} height={r*2} clipPath="url(#avatarClip)" preserveAspectRatio="xMidYMid slice"/>
+        :<circle r={r} fill={color} fillOpacity={isCenter?1:0.92}/>}
+      {!node?.photo&&<text textAnchor="middle" dominantBaseline="central" fontSize={isCenter?r*0.5:r*0.55} fontWeight="700" fill={isCenter?P.youText:textOnColor(color)} style={{pointerEvents:"none",userSelect:"none"}}>{node.id==="me"?"✦":initial}</text>}
+      {node?.type==="person"&&!isCenter&&(()=>{const days=daysSinceLastAbout(node);if(days===null)return null;const dotColor=days<7?"#90C29E":days<30?"#D9AA48":days<90?"#D9C3F4":P.dim;return(<circle cx={r*0.7} cy={-r*0.7} r={4} fill={dotColor} stroke={P.surface} strokeWidth={1.5}/>);})()}
+    </g>
+  );
+}
+
+function Graph({centerId,allNodes,allLinks,onNodeTap,onCenterTap,width,height,twoLevel,newNodeId,selectedId,editMode,onEditNode}){
+  const{neighborNodes,neighborLinks,secondLevelIds}=twoLevel?getTwoLevelGraph(centerId,allNodes,allLinks):getNeighborGraph(centerId,allNodes,allLinks);
+  const{positions,pulseScale}=useAnimatedLayout(centerId,allNodes,allLinks,width,height,twoLevel,newNodeId);
+  return(
+    <svg width={width} height={height} style={{position:"absolute",inset:0,background:P.bg}}>
+      <defs>
+        <clipPath id="avatarClip"><circle r="100%"/></clipPath>
+      </defs>
+      {/* Soft radial glow behind center */}
+      <circle cx={width/2} cy={height/2} r={Math.min(width,height)*0.4} fill="url(#glowGrad)" style={{pointerEvents:"none"}}/>
+      <defs><radialGradient id="glowGrad"><stop offset="0%" stopColor="#D9C3F4" stopOpacity="0.18"/><stop offset="100%" stopColor="#D9C3F4" stopOpacity="0"/></radialGradient></defs>
+      {neighborLinks.map((l,i)=>{
+        const sp=positions[l.source],tp=positions[l.target];if(!sp||!tp)return null;
+        const isL2=secondLevelIds.has(l.source)||secondLevelIds.has(l.target);
+        const sn=neighborNodes.find(n=>n.id===l.source),tn=neighborNodes.find(n=>n.id===l.target);
+        const sr=getNodeRadius(sn||{},centerId,secondLevelIds.has(l.source),allLinks)+3;
+        const tr=getNodeRadius(tn||{},centerId,secondLevelIds.has(l.target),allLinks)+3;
+        const dx=tp.x-sp.x,dy=tp.y-sp.y;const dist=Math.sqrt(dx*dx+dy*dy)||1;
+        const x1=sp.x+(dx/dist)*sr,y1=sp.y+(dy/dist)*sr;
+        const x2=tp.x-(dx/dist)*tr,y2=tp.y-(dy/dist)*tr;
+        const lc=connColor(l.type);
+        return<line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={isL2?P.dim:(lc||P.link)} strokeWidth={isL2?0.7:1.4} strokeOpacity={isL2?0.3:0.65} strokeLinecap="round"/>;
+      })}
+      {[...neighborNodes.filter(n=>secondLevelIds.has(n.id)),...neighborNodes.filter(n=>!secondLevelIds.has(n.id))].map(n=>{
+        const p=positions[n.id];if(!p)return null;
+        const isCenter=n.id===centerId,isL2=secondLevelIds.has(n.id),isSelected=n.id===selectedId;
+        const r=getNodeRadius(n,centerId,isL2,allLinks);
+        const color=nodeMainColor(n,allLinks,allNodes);
+        const scale=pulseScale[n.id]||1;
+        return(
+          <g key={n.id} transform={`translate(${p.x},${p.y}) scale(${scale})`} style={{cursor:"pointer"}}
+            onClick={e=>{e.stopPropagation();if(editMode&&!isCenter)onEditNode(n);else if(isCenter)onCenterTap(n);else onNodeTap(n);}}
+            onTouchEnd={e=>{e.preventDefault();e.stopPropagation();if(editMode&&!isCenter)onEditNode(n);else if(isCenter)onCenterTap(n);else onNodeTap(n);}}>
+            {isSelected&&<circle r={r+7} fill={P.selectedLight} stroke={P.selected} strokeWidth={1.5}/>}
+            <Avatar node={n} r={r} color={color} isCenter={isCenter} isSelected={isSelected}/>
+            {!isL2&&<text y={r+15} textAnchor="middle" fontSize={isCenter?13:10} fontWeight={isCenter?"700":"500"} fill={isCenter?P.text:P.text} style={{pointerEvents:"none",userSelect:"none"}} paintOrder="stroke" stroke={P.bg} strokeWidth={3} strokeLinejoin="round">{n.name.split(" ")[0]}</text>}
+            {isL2&&<text y={r+11} textAnchor="middle" fontSize={8} fill={P.muted} style={{pointerEvents:"none",userSelect:"none"}} paintOrder="stroke" stroke={P.bg} strokeWidth={3} strokeLinejoin="round">{n.name.split(" ")[0]}</text>}
+            {/* Edit mode badge */}
+            {editMode&&!isCenter&&(
+              <g transform={`translate(${r*0.65},${-r*0.65})`}>
+                <circle r={9} fill="#FFFFFF" stroke={P.border} strokeWidth={1.5}/>
+                <text textAnchor="middle" dominantBaseline="central" fontSize={9} fill={P.muted} style={{pointerEvents:"none",userSelect:"none"}}>✎</text>
+              </g>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ===== Shared styles =====
+const inp={width:"100%",padding:"10px 12px",background:P.inputBg,border:`1.5px solid ${P.border}`,borderRadius:12,color:P.text,fontSize:14,outline:"none",fontFamily:"inherit",boxSizing:"border-box"};
+const dashedBtn={border:`1.5px dashed ${P.border}`,background:"transparent",borderRadius:12,padding:"9px 12px",fontSize:13,color:P.muted,cursor:"pointer",width:"100%",fontFamily:"inherit"};
+function pbtn(v){return{padding:"10px 16px",border:"none",borderRadius:12,fontSize:14,fontWeight:v==="primary"?600:400,cursor:"pointer",fontFamily:"inherit",background:v==="primary"?P.btnPrimary:v==="danger"?P.dangerLight:P.inputBg,color:v==="primary"?P.btnPrimaryText:v==="danger"?P.danger:P.text};}
+const cardBase={position:"absolute",bottom:0,left:0,right:0,background:P.surface,borderRadius:"24px 24px 0 0",border:`1.5px solid ${P.border}`,borderBottom:"none",boxShadow:`0 -4px 24px ${P.shadow}`,padding:"20px 20px 44px",maxHeight:"82vh",overflowY:"auto",zIndex:20};
+const handle={width:36,height:4,background:P.handleBar,borderRadius:2,margin:"0 auto 16px"};
+const secLabel={fontSize:10,fontWeight:700,letterSpacing:"0.1em",color:P.muted,textTransform:"uppercase",marginBottom:8,marginTop:16};
+const fRow={padding:"10px 0",borderBottom:`1px solid ${P.borderSoft}`,display:"flex",justifyContent:"space-between",alignItems:"baseline"};
+
+// ===== Lock Screen =====
+function LockScreen({onUnlock}){
+  const[val,setVal]=useState("");const[err,setErr]=useState(false);
+  function submit(){if(val===APP_PASSWORD){localStorage.setItem(LS_UNLOCKED,"1");onUnlock();}else setErr(true);}
+  return(
+    <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,background:P.bg}}>
+      <div style={{width:"100%",maxWidth:320,background:P.surface,borderRadius:24,padding:28,boxShadow:`0 8px 30px ${P.shadow}`,border:`1.5px solid ${P.border}`}}>
+        <div style={{fontSize:18,fontWeight:700,color:P.text,marginBottom:6,textAlign:"center"}}>My people</div>
+        <div style={{fontSize:13,color:P.muted,marginBottom:18,textAlign:"center"}}>Enter password to continue</div>
+        <input type="password" value={val} onChange={e=>{setVal(e.target.value);setErr(false);}} onKeyDown={e=>e.key==="Enter"&&submit()} autoFocus style={{...inp,marginBottom:10,border:err?`1.5px solid ${P.danger}`:undefined}}/>
+        {err&&<div style={{fontSize:12,color:P.danger,marginBottom:10}}>Wrong password</div>}
+        <button onClick={submit} style={{...pbtn("primary"),width:"100%",padding:"11px 0"}}>Unlock</button>
+      </div>
+    </div>
+  );
+}
+
+function LoadingScreen(){return(<div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:P.bg,color:P.muted,fontSize:14}}>Loading your people...</div>);}
+function ErrorScreen({message,onRetry}){return(<div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",padding:20,background:P.bg}}><div style={{maxWidth:320,textAlign:"center"}}><div style={{fontSize:15,color:P.text,fontWeight:600,marginBottom:8}}>Couldn't connect</div><div style={{fontSize:13,color:P.muted,marginBottom:16}}>{message}</div><button onClick={onRetry} style={{...pbtn("secondary"),border:`1.5px solid ${P.border}`}}>Try again</button></div></div>);}
+
+// ===== Me Card =====
+function MeCard({me,stats,allNodes,onClose,onUpdate}){
+  const[editing,setEditing]=useState(false);const[name,setName]=useState(me.name);
+  const debugPeople=allNodes?allNodes.filter(n=>n.type==="person").length:stats.people;
+  return(
+    <div style={cardBase}>
+      <div style={handle}/>
+      <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20}}>
+        <div style={{width:56,height:56,borderRadius:"50%",background:P.youFill,border:`2.5px solid ${P.youStroke}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,color:P.youText,flexShrink:0}}>✦</div>
+        <div style={{flex:1}}>
+          {editing?<input value={name} onChange={e=>setName(e.target.value)} style={{...inp,fontSize:17,fontWeight:700,background:"transparent",border:"none",borderBottom:`1.5px solid ${P.border}`,borderRadius:0,padding:"4px 0"}}/>:<div style={{fontSize:19,fontWeight:700,color:P.text}}>{me.name}</div>}
+          <div style={{fontSize:13,color:P.muted,marginTop:2}}>Your personal network</div>
+        </div>
+        <button onClick={()=>{if(editing){onUpdate("me",{name});setEditing(false);}else setEditing(true);}} style={{...pbtn(editing?"primary":"secondary"),flexShrink:0}}>{editing?"Done":"Edit"}</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:8}}>
+        {[["People",debugPeople],["Categories",stats.categories],["Connections",stats.connections],["Notes",stats.about]].map(([label,val])=>(
+          <div key={label} style={{background:P.inputBg,borderRadius:14,padding:"12px 14px",border:`1.5px solid ${P.border}`}}>
+            <div style={{fontSize:22,fontWeight:700,color:P.btnPrimaryText}}>{val}</div>
+            <div style={{fontSize:12,color:P.muted,marginTop:2}}>{label}</div>
+          </div>
+        ))}
+      </div>
+      <button onClick={onClose} style={{...pbtn("secondary"),width:"100%",textAlign:"center",marginTop:12}}>Close</button>
+    </div>
+  );
+}
+
+// ===== Person Card =====
+function PersonCard({person,allNodes,allLinks,fieldDefs,onClose,onNavigate,onUpdate,onAddFieldDef,onDelete,isSidePanel,saving}){
+  const[editing,setEditing]=useState(false);const[draft,setDraft]=useState(null);
+  const[showAddAbout,setShowAddAbout]=useState(false);const[newAboutDate,setNewAboutDate]=useState("");const[newAboutText,setNewAboutText]=useState("");
+  const[showAddField,setShowAddField]=useState(false);const[newFieldLabel,setNewFieldLabel]=useState("");const[newFieldValue,setNewFieldValue]=useState("");
+  const[showDelConfirm,setShowDelConfirm]=useState(false);
+  const[showAddConn,setShowAddConn]=useState(false);const[connName,setConnName]=useState("");const[connType,setConnType]=useState("");const[connMatchId,setConnMatchId]=useState(null);
+  const[catInput,setCatInput]=useState("");const[showCatDropdown,setShowCatDropdown]=useState(false);
+  const touchStart=useRef(null);
+  const onTouchStart=e=>{if(!isSidePanel)touchStart.current=e.touches[0].clientY;};
+  const onTouchEnd=e=>{if(!isSidePanel&&touchStart.current!==null&&e.changedTouches[0].clientY-touchStart.current>80)onClose();touchStart.current=null;};
+  const pColor=nodeMainColor(person,allLinks,allNodes);
+  // Find all categories for this person
+  const personCatLinks=allLinks.filter(l=>(l.source===person.id||l.target===person.id));
+  const personCats=personCatLinks.map(l=>{const catId=l.source===person.id?l.target:l.source;return allNodes.find(n=>n.id===catId&&n.type==="category");}).filter(Boolean);
+  const aboutSorted=[...(person.about||[])].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const conns=allLinks.filter(l=>l.source===person.id||l.target===person.id).map(l=>{const oid=l.source===person.id?l.target:l.source;return{node:allNodes.find(n=>n.id===oid),type:l.type};}).filter(c=>c.node&&c.node.id!=="me"&&c.node.type==="person");
+  const personCF=fieldDefs.filter(f=>person.customValues?.[f.id]);
+  const importantF=fieldDefs.filter(f=>(person.importantFieldIds||[]).includes(f.id)&&person.customValues?.[f.id]);
+  const connMatches=connName.trim()&&!connMatchId?allNodes.filter(n=>n.type==="person"&&n.id!==person.id&&n.name.toLowerCase().includes(connName.toLowerCase())):[];
+  function startEdit(){setDraft({name:person.name,birthday:person.birthday||"",about:[...(person.about||[])],customValues:{...(person.customValues||{})},importantFieldIds:[...(person.importantFieldIds||[])]});setEditing(true);}
+  function saveEdit(){onUpdate(person.id,draft);setEditing(false);setDraft(null);setShowAddAbout(false);setShowAddField(false);}
+  function addAbout(){if(!newAboutText.trim())return;const date=newAboutDate||new Date().toISOString().slice(0,10);setDraft(d=>({...d,about:[...d.about,{date,text:newAboutText.trim()}]}));setNewAboutDate("");setNewAboutText("");setShowAddAbout(false);}
+  function toggleImportant(fid){setDraft(d=>{const ids=d.importantFieldIds||[];return{...d,importantFieldIds:ids.includes(fid)?ids.filter(x=>x!==fid):[...ids,fid]};});}
+  function addCF(){if(!newFieldLabel.trim())return;const id="f"+Date.now();onAddFieldDef({id,label:newFieldLabel.trim(),type:"text"});setDraft(d=>({...d,customValues:{...d.customValues,[id]:newFieldValue.trim()}}));setNewFieldLabel("");setNewFieldValue("");setShowAddField(false);}
+  const FBOX={border:`1.5px solid ${P.borderSoft}`,borderRadius:14,padding:"0 14px",marginBottom:12};
+  const panelStyle=isSidePanel?{position:"absolute",top:0,right:0,bottom:0,width:320,background:P.surface,borderLeft:`1.5px solid ${P.border}`,boxShadow:`-4px 0 20px ${P.shadow}`,padding:"24px 20px 40px",overflowY:"auto",zIndex:20}:cardBase;
+  return(
+    <div style={panelStyle} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      {!isSidePanel&&<div style={handle}/>}
+      {isSidePanel&&<button onClick={onClose} style={{position:"absolute",top:16,right:16,background:"none",border:"none",cursor:"pointer",fontSize:18,color:P.muted}}>×</button>}
+      {saving&&<div style={{textAlign:"center",fontSize:11,color:P.muted,marginBottom:8}}>Saving…</div>}
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+        <div style={{width:52,height:52,borderRadius:"50%",background:`${pColor}20`,border:`2px solid ${pColor}50`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,fontWeight:700,color:pColor,flexShrink:0}}>
+          {person.photo?<img src={person.photo} style={{width:52,height:52,borderRadius:"50%",objectFit:"cover"}} alt=""/>:(editing?draft.name[0]:person.name[0])||"?"}
+        </div>
+        <div style={{flex:1}}>
+          {editing?<input value={draft.name} onChange={e=>setDraft(d=>({...d,name:e.target.value}))} style={{...inp,fontSize:17,fontWeight:700,background:"transparent",border:"none",borderBottom:`1.5px solid ${P.border}`,borderRadius:0,padding:"4px 0"}}/>:<div style={{fontSize:18,fontWeight:700,color:P.text}}>{person.name}</div>}
+          {!editing&&personCats.length>0&&(
+            <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>
+              {personCats.map(cat=>(
+                <span key={cat.id} style={{fontSize:11,padding:"2px 8px",borderRadius:20,background:`${categoryColorFor(cat)}25`,border:`1px solid ${categoryColorFor(cat)}50`,color:P.text,fontWeight:600}}>{cat.name}</span>
+              ))}
+            </div>
+          )}
+        </div>
+        <button onClick={editing?saveEdit:startEdit} style={{...pbtn(editing?"primary":"secondary"),flexShrink:0,padding:"7px 14px"}}>{editing?"Done":"Edit"}</button>
+      </div>
+      {!editing&&(<>
+        {importantF.length>0&&<div style={{background:`${pColor}12`,border:`1.5px solid ${pColor}25`,borderRadius:14,padding:"10px 14px",marginBottom:12}}><div style={{...secLabel,marginTop:0,color:pColor}}>Important</div>{importantF.map(f=><div key={f.id} style={{display:"flex",justifyContent:"space-between",padding:"3px 0"}}><span style={{fontSize:14,color:P.text}}>{person.customValues[f.id]}</span><span style={{fontSize:12,color:P.muted}}>{f.label}</span></div>)}</div>}
+        {person.birthday&&<div style={FBOX}><div style={{...fRow,borderBottom:"none"}}><span style={{fontSize:14,color:P.text}}>{formatDate(person.birthday)} · age {calcAge(person.birthday)}</span><span style={{fontSize:12,color:P.muted}}>Birthday</span></div></div>}
+        {personCF.filter(f=>!(person.importantFieldIds||[]).includes(f.id)).length>0&&<div style={FBOX}>{personCF.filter(f=>!(person.importantFieldIds||[]).includes(f.id)).map((f,i,arr)=><div key={f.id} style={{...fRow,borderBottom:i<arr.length-1?undefined:"none"}}><span style={{fontSize:14,color:P.text}}>{person.customValues[f.id]}</span><span style={{fontSize:12,color:P.muted}}>{f.label}</span></div>)}</div>}
+        <div style={secLabel}>About</div>
+        {aboutSorted.length===0&&<div style={{fontSize:13,color:P.dim,marginBottom:12}}>No entries yet</div>}
+        {aboutSorted.map((e,i)=><div key={i} style={{display:"flex",gap:10,paddingBottom:10}}><div style={{width:7,height:7,borderRadius:"50%",background:pColor,marginTop:5,flexShrink:0,opacity:i===0?1:0.5}}/><div><div style={{fontSize:11,color:P.muted,marginBottom:2}}>{formatDate(e.date)}</div><div style={{fontSize:14,color:P.text}}>{e.text}</div></div></div>)}
+        {conns.length>0&&<><div style={secLabel}>Connections</div><div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>{conns.map((c,i)=>{const lc=connColor(c.type);return(<button key={i} onClick={()=>onNavigate(c.node.id)} style={{display:"flex",alignItems:"center",gap:7,background:P.inputBg,border:`1.5px solid ${lc||P.border}`,borderRadius:20,padding:"6px 12px",fontSize:13,color:P.text,cursor:"pointer"}}><div style={{width:18,height:18,borderRadius:"50%",background:nodeMainColor(c.node,allLinks,allNodes),display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:"white"}}>{c.node.name[0]}</div>{c.node.name.split(" ")[0]}{c.type&&<span style={{color:lc||P.muted,fontSize:11,fontWeight:600}}>{c.type}</span>}</button>);})}</div></>}
+        {conns.length===0&&aboutSorted.length===0&&<div style={{textAlign:"center",padding:"16px 0",color:P.dim,fontSize:13}}>No connections yet — tap Edit to start</div>}
+        <button onClick={onClose} style={{...pbtn("secondary"),width:"100%",textAlign:"center"}}>Close</button>
+      </>)}
+      {editing&&draft&&(<>
+        {(()=>{
+          const allCats=allNodes.filter(n=>n.type==="category");
+          const currentCatIds=new Set(personCats.map(c=>c.id));
+          const filteredCats=allCats.filter(c=>!currentCatIds.has(c.id)&&(!catInput.trim()||c.name.toLowerCase().includes(catInput.toLowerCase())));
+          function assignCategory(cat){
+            onUpdate(person.id,{_newConn:{target:cat.id,type:"member"}});
+            // Remove direct me→person link so they leave the main graph
+            onUpdate(person.id,{_removeDirectLink:true});
+            setCatInput("");setShowCatDropdown(false);
+          }
+          return(
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,color:P.muted,marginBottom:4}}>Category</div>
+              {personCats.length>0&&(
+                <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:6}}>
+                  {personCats.map(cat=>(
+                    <span key={cat.id} style={{fontSize:12,padding:"3px 10px",borderRadius:20,background:`${categoryColorFor(cat)}20`,border:`1.5px solid ${categoryColorFor(cat)}50`,color:P.text,fontWeight:600}}>{cat.name}</span>
+                  ))}
+                </div>
+              )}
+              <div style={{position:"relative"}}>
+                <input value={catInput} onChange={e=>{setCatInput(e.target.value);setShowCatDropdown(true);}} onFocus={()=>setShowCatDropdown(true)} placeholder={personCats.length>0?"Add to another category…":"Type to assign category…"} style={inp}/>
+                {showCatDropdown&&filteredCats.length>0&&(
+                  <div style={{position:"absolute",bottom:"100%",left:0,right:0,marginBottom:4,background:P.surface,border:`1.5px solid ${P.border}`,borderRadius:14,boxShadow:`0 -4px 16px ${P.shadow}`,zIndex:50,overflow:"hidden"}}>
+                    {filteredCats.map(cat=>(
+                      <div key={cat.id} onMouseDown={e=>{e.preventDefault();assignCategory(cat);}} style={{padding:"10px 14px",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,borderBottom:`1px solid ${P.borderSoft}`,color:P.text}}>
+                        <div style={{width:12,height:12,borderRadius:"50%",background:categoryColorFor(cat),flexShrink:0}}/>
+                        {cat.name}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+        <div style={{marginBottom:12}}><div style={{fontSize:11,color:P.muted,marginBottom:4}}>Birthday</div><input type="date" value={draft.birthday} onChange={e=>setDraft(d=>({...d,birthday:e.target.value}))} style={inp}/></div>
+        {fieldDefs.filter(f=>draft.customValues[f.id]).length>0&&<div style={{marginBottom:12}}><div style={secLabel}>Details</div>{fieldDefs.filter(f=>draft.customValues[f.id]).map(f=><div key={f.id} style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}><span style={{fontSize:11,color:P.muted}}>{f.label}</span><button onClick={()=>toggleImportant(f.id)} style={{border:"none",background:"none",cursor:"pointer",fontSize:11,color:(draft.importantFieldIds||[]).includes(f.id)?pColor:P.dim,fontFamily:"inherit"}}>{(draft.importantFieldIds||[]).includes(f.id)?"★ important":"☆ mark important"}</button></div><div style={{display:"flex",gap:6}}><input value={draft.customValues[f.id]||""} onChange={e=>setDraft(d=>({...d,customValues:{...d.customValues,[f.id]:e.target.value}}))} style={{...inp,flex:1}}/><button onClick={()=>setDraft(d=>{const cv={...d.customValues};delete cv[f.id];return{...d,customValues:cv,importantFieldIds:(d.importantFieldIds||[]).filter(x=>x!==f.id)};})} style={{...pbtn("danger"),padding:"10px 12px"}}>×</button></div></div>)}</div>}
+        {!showAddField?<button onClick={()=>setShowAddField(true)} style={{...dashedBtn,marginBottom:12}}>+ Add detail</button>:<div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}><input value={newFieldLabel} onChange={e=>setNewFieldLabel(e.target.value)} placeholder="Field name" autoFocus style={inp}/><input value={newFieldValue} onChange={e=>setNewFieldValue(e.target.value)} placeholder="Value" style={inp}/><div style={{display:"flex",gap:8}}><button onClick={addCF} style={{...pbtn("primary"),flex:1}}>Save</button><button onClick={()=>setShowAddField(false)} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
+        <div style={secLabel}>About</div>
+        {[...draft.about].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((e,i)=><div key={i} style={{display:"flex",gap:10,paddingBottom:10,alignItems:"flex-start"}}><div style={{width:7,height:7,borderRadius:"50%",background:pColor,marginTop:5,flexShrink:0}}/><div style={{flex:1}}><div style={{fontSize:11,color:P.muted,marginBottom:2}}>{formatDate(e.date)}</div><div style={{fontSize:14,color:P.text}}>{e.text}</div></div><button onClick={()=>setDraft(d=>({...d,about:d.about.filter(x=>x!==e)}))} style={{background:"none",border:"none",color:P.muted,fontSize:16,cursor:"pointer",padding:"0 4px"}}>×</button></div>)}
+        {!showAddAbout?<button onClick={()=>setShowAddAbout(true)} style={{...dashedBtn,marginBottom:12}}>+ Add about entry</button>:<div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}><input type="date" value={newAboutDate} onChange={e=>setNewAboutDate(e.target.value)} style={inp}/><input value={newAboutText} onChange={e=>setNewAboutText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addAbout()} placeholder="What happened..." autoFocus style={inp}/><div style={{display:"flex",gap:8}}><button onClick={addAbout} style={{...pbtn("primary"),flex:1}}>Save</button><button onClick={()=>setShowAddAbout(false)} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
+        <div style={secLabel}>Connections</div>
+        {!showAddConn?<button onClick={()=>setShowAddConn(true)} style={{...dashedBtn,marginBottom:12}}>+ Add connection</button>:(()=>{
+          const canCreateNew=connName.trim().length>1&&!connMatchId&&connMatches.length===0;
+          function saveConn(){if(connMatchId&&connType.trim()){onUpdate(person.id,{_newConn:{target:connMatchId,type:connType.trim()}});setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}}
+          function saveNewPerson(){if(connName.trim()&&connType.trim()){onUpdate(person.id,{_newPerson:{name:connName.trim(),connType:connType.trim()}});setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}}
+          return(<div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}>
+            <input value={connName} onChange={e=>{setConnName(e.target.value);setConnMatchId(null);}} placeholder="Type a name..." autoFocus style={inp}/>
+            {connMatches.map(m=><button key={m.id} onClick={()=>{setConnMatchId(m.id);setConnName(m.name);}} style={{textAlign:"left",...pbtn("secondary"),padding:"8px 12px"}}>{m.name}</button>)}
+            {canCreateNew&&<div style={{fontSize:12,color:P.muted,padding:"2px 4px"}}>"{connName.trim()}" not found — add as new person?</div>}
+            {(connMatchId||canCreateNew)&&<select value={connType} onChange={e=>setConnType(e.target.value)} style={{...inp,color:connType?P.text:P.muted}}><option value="" disabled>Relationship type…</option>{CONN_TYPES.map(c=><option key={c.label} value={c.label}>{c.label}</option>)}</select>}
+            <div style={{display:"flex",gap:8}}>
+              {connMatchId&&<button onClick={saveConn} disabled={!connType.trim()} style={{...pbtn("primary"),flex:1,opacity:!connType.trim()?0.4:1}}>Save</button>}
+              {canCreateNew&&<button onClick={saveNewPerson} disabled={!connType.trim()} style={{...pbtn("primary"),flex:1,opacity:!connType.trim()?0.4:1}}>+ Add & connect</button>}
+              <button onClick={()=>{setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}} style={{...pbtn("secondary"),flex:1}}>Cancel</button>
+            </div>
+          </div>);
+        })()}
+        {!showDelConfirm?<button onClick={()=>setShowDelConfirm(true)} style={{...pbtn("danger"),width:"100%",textAlign:"center",marginTop:8}}>Delete person</button>:<div style={{marginTop:8,border:`1.5px solid ${P.danger}40`,borderRadius:14,padding:14}}><div style={{fontSize:14,marginBottom:12,color:P.text}}>Remove {person.name}?</div><div style={{display:"flex",gap:8}}><button onClick={()=>onDelete(person.id)} style={{...pbtn("danger"),flex:1}}>Yes, delete</button><button onClick={()=>setShowDelConfirm(false)} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
+      </>)}
+    </div>
+  );
+}
+
+// ===== Uncategorized Drawer =====
+function UncategorizedDrawer({people,allNodes,allLinks,onClose,onSelectPerson}){
+  const touchStart=useRef(null);
+  const onTouchStart=e=>{touchStart.current=e.touches[0].clientY;};
+  const onTouchEnd=e=>{if(touchStart.current!==null&&e.changedTouches[0].clientY-touchStart.current>80)onClose();touchStart.current=null;};
+  return(
+    <div style={{position:"absolute",inset:0,background:"rgba(61,32,48,0.25)",backdropFilter:"blur(4px)",zIndex:25,display:"flex",alignItems:"flex-end"}} onClick={onClose}>
+      <div style={{width:"100%",background:P.surface,borderRadius:"28px 28px 0 0",border:`1.5px solid ${P.border}`,borderBottom:"none",boxShadow:`0 -4px 24px ${P.shadow}`,paddingBottom:40,maxHeight:"70vh",display:"flex",flexDirection:"column"}} onClick={e=>e.stopPropagation()} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        <div style={{width:40,height:4,background:P.handleBar,borderRadius:2,margin:"12px auto 8px",flexShrink:0}}/>
+        <div style={{padding:"8px 22px 14px",borderBottom:`1px solid ${P.borderSoft}`,flexShrink:0}}>
+          <div style={{fontSize:16,fontWeight:700,color:P.text}}>👤 Uncategorized</div>
+          <div style={{fontSize:12,color:P.muted,marginTop:2}}>{people.length} {people.length===1?"person":"people"} not in any category</div>
+        </div>
+        <div style={{overflowY:"auto",padding:"12px 22px 0",flex:1}}>
+          {people.map(n=>{
+            const color=personBaseColor(n.id,allLinks,allNodes);
+            return(
+              <div key={n.id} onClick={()=>{onSelectPerson(n.id);onClose();}} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 0",borderBottom:`1px solid ${P.borderSoft}`,cursor:"pointer"}}>
+                <div style={{width:38,height:38,borderRadius:"50%",background:`${color}20`,border:`2px solid ${color}50`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color,flexShrink:0}}>{n.name[0]}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:15,fontWeight:600,color:P.text}}>{n.name}</div>
+                  {n.birthday&&<div style={{fontSize:11,color:P.muted,marginTop:1}}>🎂 {formatDate(n.birthday)}</div>}
+                </div>
+                <span style={{fontSize:18,color:P.muted}}>›</span>
+              </div>
+            );
+          })}
+          {people.length===0&&<div style={{textAlign:"center",padding:"24px 0",color:P.muted,fontSize:14}}>No uncategorized people 🎉</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== Edit Sheet (category/person edit from edit mode) =====
+function EditSheet({node,allNodes,onClose,onRename,onChangeColor,onDeleteCategory,onDeletePerson,onAddPerson}){
+  const[view,setView]=useState("main"); // main | rename | color
+  const[newName,setNewName]=useState(node.name);
+  const isCategory=node.type==="category";
+  const color=nodeMainColor(node,[],allNodes);
+  const personCount=isCategory?allNodes.filter(n=>n.type==="person").length:0; // rough count
+  return(
+    <div style={{position:"absolute",inset:0,background:"rgba(61,32,48,0.25)",backdropFilter:"blur(4px)",zIndex:30,display:"flex",alignItems:"flex-end"}}>
+      <div style={{width:"100%",background:P.surface,borderRadius:"28px 28px 0 0",border:`1.5px solid ${P.border}`,borderBottom:"none",boxShadow:`0 -4px 24px ${P.shadow}`,paddingBottom:40,overflow:"hidden"}}>
+        <div style={{width:40,height:4,background:P.handleBar,borderRadius:2,margin:"12px auto 0"}}/>
+        {/* Entity header */}
+        <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 22px 14px",borderBottom:`1px solid ${P.borderSoft}`}}>
+          <div style={{width:44,height:44,borderRadius:14,background:`${color}30`,border:`2px solid ${color}60`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>{isCategory?"🏷️":"👤"}</div>
+          <div>
+            <div style={{fontSize:17,fontWeight:700,color:P.text}}>{node.name}</div>
+            <div style={{fontSize:12,color:P.muted,marginTop:2}}>{isCategory?"Category":"Person"}</div>
+          </div>
+        </div>
+        {view==="main"&&(<ul style={{listStyle:"none",margin:0,padding:"8px 0"}}>
+          <li onClick={()=>setView("rename")} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 22px",cursor:"pointer",fontSize:15,color:P.text,fontWeight:500}}>
+            <div style={{width:34,height:34,borderRadius:10,background:"#FDE8EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>✏️</div>
+            Rename {isCategory?"category":"person"}
+          </li>
+          {isCategory&&(<>
+            <li onClick={()=>setView("color")} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 22px",cursor:"pointer",fontSize:15,color:P.text,fontWeight:500}}>
+              <div style={{width:34,height:34,borderRadius:10,background:"#EDE4F8",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🎨</div>
+              Change color
+            </li>
+            <li onClick={()=>{onAddPerson(node);onClose();}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 22px",cursor:"pointer",fontSize:15,color:P.text,fontWeight:500}}>
+              <div style={{width:34,height:34,borderRadius:10,background:"#FDE8EE",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>👤</div>
+              Add person to {node.name}
+            </li>
+          </>)}
+          <div style={{height:1,background:P.borderSoft,margin:"4px 0"}}/>
+          <li onClick={()=>{if(isCategory)onDeleteCategory(node.id);else onDeletePerson(node.id);onClose();}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 22px",cursor:"pointer",fontSize:15,color:P.danger,fontWeight:500}}>
+            <div style={{width:34,height:34,borderRadius:10,background:"#FFE8E8",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🗑</div>
+            Delete {isCategory?"category":"person"}
+            {isCategory&&<span style={{fontSize:12,color:P.muted,marginLeft:"auto"}}>people stay</span>}
+          </li>
+        </ul>)}
+        {view==="rename"&&(
+          <div style={{padding:"20px 22px"}}>
+            <div style={{fontSize:13,color:P.muted,marginBottom:10}}>New name</div>
+            <input value={newName} onChange={e=>setNewName(e.target.value)} autoFocus style={{...inp,marginBottom:14}} onKeyDown={e=>e.key==="Enter"&&newName.trim()&&onRename(node.id,newName.trim(),isCategory)&&onClose()}/>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>{if(newName.trim()){onRename(node.id,newName.trim(),isCategory);onClose();}}} style={{...pbtn("primary"),flex:2}}>Save</button>
+              <button onClick={()=>setView("main")} style={{...pbtn("secondary"),flex:1}}>Back</button>
+            </div>
+          </div>
+        )}
+        {view==="color"&&isCategory&&(
+          <div style={{padding:"20px 22px"}}>
+            <div style={{fontSize:13,color:P.muted,marginBottom:12}}>Pick a color</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:10,marginBottom:16}}>
+              {CAT_PALETTE.map((c,i)=>(
+                <div key={c} onClick={()=>{onChangeColor(node.id,c);onClose();}} style={{width:"100%",aspectRatio:"1",borderRadius:"50%",background:c,border:`2px solid ${node.color===c?"#3D2030":"transparent"}`,cursor:"pointer",transition:"transform .12s",transform:node.color===c?"scale(1.18)":"scale(1)"}}/>
+              ))}
+            </div>
+            <button onClick={()=>setView("main")} style={{...pbtn("secondary"),width:"100%"}}>Back</button>
+          </div>
+        )}
+        <button onClick={onClose} style={{width:"calc(100% - 44px)",margin:"8px 22px 0",padding:14,borderRadius:14,border:`1.5px solid ${P.border}`,background:P.surface,fontSize:15,fontWeight:600,color:P.muted,fontFamily:"inherit",cursor:"pointer"}}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ===== Quick Note =====
+function QuickNoteModal({allNodes,onSave,onCancel}){
+  const[search,setSearch]=useState("");const[selectedId,setSelectedId]=useState(null);const[noteDate,setNoteDate]=useState("");const[noteText,setNoteText]=useState("");
+  const matches=search.trim()&&!selectedId?allNodes.filter(n=>n.type==="person"&&n.name.toLowerCase().includes(search.toLowerCase())):[];
+  const selected=allNodes.find(n=>n.id===selectedId);
+  const pColor=selectedId?personBaseColor(selectedId,[],allNodes):P.muted;
+  function save(){if(!selectedId||!noteText.trim())return;const date=noteDate||new Date().toISOString().slice(0,10);onSave(selectedId,{date,text:noteText.trim()});}
+  return(
+    <div style={{position:"absolute",inset:0,background:"rgba(61,32,48,0.3)",backdropFilter:"blur(4px)",zIndex:30,display:"flex",alignItems:"flex-end"}}>
+      <div style={{width:"100%",background:P.surface,borderRadius:"24px 24px 0 0",border:`1.5px solid ${P.border}`,boxShadow:`0 -4px 24px ${P.shadow}`,padding:"20px 20px 44px"}}>
+        <div style={handle}/>
+        <div style={{fontSize:17,fontWeight:700,color:P.text,marginBottom:4}}>Quick note</div>
+        <div style={{fontSize:13,color:P.muted,marginBottom:14}}>Jot something down in 3 taps.</div>
+        {!selectedId?(<>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Who is it about?" autoFocus style={{...inp,marginBottom:10,fontSize:15}}/>
+          {matches.map(n=><button key={n.id} onClick={()=>{setSelectedId(n.id);setSearch("");}} style={{textAlign:"left",display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 12px",background:P.inputBg,border:`1.5px solid ${P.border}`,borderRadius:12,color:P.text,cursor:"pointer",marginBottom:6,fontFamily:"inherit",fontSize:14}}><div style={{width:26,height:26,borderRadius:"50%",background:`${personBaseColor(n.id,[],allNodes)}25`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:personBaseColor(n.id,[],allNodes)}}>{n.name[0]}</div>{n.name}</button>)}
+        </>):(<>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,padding:"8px 12px",background:P.inputBg,borderRadius:12,border:`1.5px solid ${P.border}`}}>
+            <div style={{width:26,height:26,borderRadius:"50%",background:`${pColor}25`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:pColor}}>{selected?.name[0]}</div>
+            <span style={{fontSize:14,color:P.text,flex:1}}>{selected?.name}</span>
+            <button onClick={()=>setSelectedId(null)} style={{background:"none",border:"none",color:P.muted,cursor:"pointer",fontSize:18,padding:0}}>×</button>
+          </div>
+          <input type="date" value={noteDate} onChange={e=>setNoteDate(e.target.value)} style={{...inp,marginBottom:8}}/>
+          <textarea value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="What happened?" autoFocus rows={3} style={{...inp,resize:"none",marginBottom:10,lineHeight:1.5}}/>
+          <button onClick={save} style={{...pbtn("primary"),width:"100%",fontSize:15,padding:13,marginBottom:6}}>Save note</button>
+        </>)}
+        <button onClick={onCancel} style={{width:"100%",padding:13,background:"transparent",color:P.muted,border:"none",fontSize:15,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ===== Add Category Modal (with 16-color picker) =====
+function AddCategoryModal({onSave,onCancel}){
+  const[name,setName]=useState("");
+  const[selectedColor,setSelectedColor]=useState(CAT_PALETTE[2]); // default #D9C3F4
+  const suggestions=["Friends","Family","Work","School","Community","Clients","Personal","Health"];
+  return(
+    <div style={{position:"absolute",inset:0,background:"rgba(61,32,48,0.3)",backdropFilter:"blur(4px)",zIndex:30,display:"flex",alignItems:"flex-end"}}>
+      <div style={{width:"100%",background:P.surface,borderRadius:"24px 24px 0 0",border:`1.5px solid ${P.border}`,boxShadow:`0 -4px 24px ${P.shadow}`,padding:"20px 20px 44px",maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={handle}/>
+        <div style={{fontSize:17,fontWeight:700,color:P.text,marginBottom:2,textAlign:"center"}}>New Category</div>
+        <div style={{fontSize:13,color:P.muted,marginBottom:16,textAlign:"center"}}>Give it a name and pick a color</div>
+
+        {/* Name input */}
+        <div style={{fontSize:10,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:6}}>Category name</div>
+        <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&name.trim()&&onSave(name.trim(),selectedColor)} placeholder="e.g. Neighbors" autoFocus style={{...inp,marginBottom:10}}/>
+        {/* Suggestions */}
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:16}}>
+          {suggestions.map(s=><button key={s} onClick={()=>setName(s)} style={{padding:"5px 12px",borderRadius:20,background:name===s?selectedColor:P.inputBg,color:name===s?P.text:P.muted,border:`1.5px solid ${name===s?selectedColor:P.border}`,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:name===s?600:400}}>{s}</button>)}
+        </div>
+
+        {/* Color picker */}
+        <div style={{fontSize:10,fontWeight:700,color:P.muted,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>Color</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:10,marginBottom:16}}>
+          {CAT_PALETTE.map((c,i)=>(
+            <div key={c} onClick={()=>setSelectedColor(c)} style={{width:"100%",aspectRatio:"1",borderRadius:"50%",background:c,border:`2px solid ${selectedColor===c?"#3D2030":"transparent"}`,cursor:"pointer",transition:"transform .12s",transform:selectedColor===c?"scale(1.18)":"scale(1)",boxShadow:selectedColor===c?"0 2px 8px rgba(0,0,0,0.15)":"none"}}/>
+          ))}
+        </div>
+
+        {/* Preview */}
+        {name.trim()&&(
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:16,padding:"12px 14px",background:P.inputBg,borderRadius:14,border:`1.5px solid ${P.border}`}}>
+            <div style={{width:48,height:48,borderRadius:"50%",background:selectedColor,border:`2.5px solid ${selectedColor}80`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🏷️</div>
+            <div>
+              <div style={{fontSize:16,fontWeight:700,color:P.text}}>{name}</div>
+              <div style={{fontSize:12,color:P.muted,marginTop:2}}>New category · 0 people</div>
+            </div>
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={onCancel} style={{...pbtn("secondary"),flex:1}}>Cancel</button>
+          <button onClick={()=>name.trim()&&onSave(name.trim(),selectedColor)} disabled={!name.trim()} style={{...pbtn("primary"),flex:2,opacity:name.trim()?1:0.4}}>Create category</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ===== Add Person =====
+function AddPersonModal({centerNode,allNodes,onSave,onOpenExisting,onCancel}){
+  const[name,setName]=useState("");
+  const label=centerNode?.id==="me"?"Add a person":centerNode?.type==="category"?`Add to ${centerNode.name}`:`Add connection to ${centerNode?.name?.split(" ")[0]}`;
+  const duplicates=name.trim().length>1?allNodes.filter(n=>{if(n.type!=="person")return false;const q=name.trim().toLowerCase();const full=n.name.toLowerCase();const first=full.split(" ")[0];return first.startsWith(q)||q.startsWith(first)||full.includes(q);}):[];
+  return(
+    <div style={{position:"absolute",inset:0,background:"rgba(61,32,48,0.3)",backdropFilter:"blur(4px)",zIndex:30,display:"flex",alignItems:"flex-end"}}>
+      <div style={{width:"100%",background:P.surface,borderRadius:"24px 24px 0 0",border:`1.5px solid ${P.border}`,boxShadow:`0 -4px 24px ${P.shadow}`,padding:"20px 20px 44px"}}>
+        <div style={handle}/>
+        <div style={{fontSize:17,fontWeight:700,color:P.text,marginBottom:4}}>{label}</div>
+        <div style={{fontSize:13,color:P.muted,marginBottom:14}}>Enter a name — add details after.</div>
+        <input value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&name.trim()&&!duplicates.length&&onSave(name.trim())} placeholder="Their name" autoFocus style={{...inp,marginBottom:12,fontSize:15}}/>
+        {duplicates.length>0&&(
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:600,color:P.link,marginBottom:8}}>⚠ Might already exist</div>
+            {duplicates.map(n=><button key={n.id} onClick={()=>onOpenExisting(n.id)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 12px",background:P.inputBg,border:`1.5px solid ${P.border}`,borderRadius:12,color:P.text,cursor:"pointer",marginBottom:6,fontFamily:"inherit",fontSize:14,textAlign:"left"}}>
+              <div style={{width:28,height:28,borderRadius:"50%",background:`${personBaseColor(n.id,[],allNodes)}25`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:personBaseColor(n.id,[],allNodes)}}>{n.name[0]}</div>
+              <div style={{flex:1}}><div style={{fontWeight:500}}>{n.name}</div>{n.birthday&&<div style={{fontSize:11,color:P.muted}}>b. {formatDate(n.birthday)}</div>}</div>
+              <span style={{fontSize:12,color:P.link}}>Open →</span>
+            </button>)}
+            <div style={{fontSize:12,color:P.muted,marginBottom:8}}>Not them? Add anyway:</div>
+          </div>
+        )}
+        <button onClick={()=>name.trim()&&onSave(name.trim())} style={{...pbtn("primary"),width:"100%",fontSize:15,padding:13,marginBottom:6}}>{duplicates.length>0?`Add "${name.trim()}" as new`:"Add person"}</button>
+        <button onClick={onCancel} style={{width:"100%",padding:13,background:"transparent",color:P.muted,border:"none",fontSize:15,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+// ===== AI Chat =====
+async function callClaudeAI(message, people) {
+  const peopleList = people.map(p => `- ${p.name} (id: ${p.id})${p.birthday?`, birthday: ${p.birthday}`:""}${p.about?.length?`, last note: "${p.about[p.about.length-1]?.text}"`:""}`).join("\n");
+  const systemPrompt = `You are a personal CRM assistant. The user will tell you something about their life and you must figure out what to save and where.
+
+People in their network:
+${peopleList}
+
+You must respond with ONLY a JSON array (no explanation, no markdown) of actions to take. Each action is one of:
+- {"type":"about","personId":"<id>","date":"<YYYY-MM-DD>","text":"<note about this person>"}
+- {"type":"birthday","personId":"<id>","date":"<YYYY-MM-DD>"}
+- {"type":"field","personId":"<id>","fieldLabel":"<label>","value":"<value>"}
+
+Today's date is ${new Date().toISOString().slice(0,10)}.
+If you cannot match anyone, return [].
+Only return actions you are confident about.`;
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{"x-api-key":CLAUDE_API_KEY,"anthropic-version":"2023-06-01","content-type":"application/json","anthropic-dangerous-direct-browser-calls":"true"},
+    body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:512,system:systemPrompt,messages:[{role:"user",content:message}]}),
+  });
+  if(!res.ok) throw new Error(`Claude API error: ${res.status}`);
+  const data = await res.json();
+  const text = data.content?.[0]?.text || "[]";
+  try { return JSON.parse(text); } catch(e) { return []; }
+}
+
+function AIChatModal({allNodes, onSave, onCancel}) {
+  const[text,setText]=useState("");
+  const[status,setStatus]=useState("idle");
+  const[result,setResult]=useState(null);
+  const[errMsg,setErrMsg]=useState("");
+  const[listening,setListening]=useState(false);
+  const recRef=useRef(null);
+  const textareaRef=useRef(null);
+  const people=allNodes.filter(n=>n.type==="person");
+
+  function startMic(){
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR){setErrMsg("Speech recognition not supported in this browser.");return;}
+    if(recRef.current){recRef.current.stop();return;}
+    const rec=new SR();
+    rec.lang=navigator.language||"he-IL";
+    rec.continuous=false;
+    rec.interimResults=false;
+    rec.onstart=()=>setListening(true);
+    rec.onresult=e=>{
+      const t=Array.from(e.results).map(r=>r[0].transcript).join(" ");
+      setText(prev=>prev?prev+" "+t:t);
+      recRef.current=null;
+      setListening(false);
+      setTimeout(()=>textareaRef.current?.focus(),50);
+    };
+    rec.onerror=e=>{setErrMsg("Mic: "+e.error);recRef.current=null;setListening(false);};
+    rec.onend=()=>{recRef.current=null;setListening(false);};
+    recRef.current=rec;
+    rec.start();
+  }
+
+  async function send(){
+    if(!text.trim())return;
+    setStatus("thinking");setResult(null);setErrMsg("");
+    try{
+      const actions=await callClaudeAI(text.trim(),people);
+      if(!actions||actions.length===0){setStatus("done");setResult([]);return;}
+      for(const a of actions){await onSave(a);}
+      setResult(actions);setStatus("done");
+    }catch(e){setErrMsg(e.message||"Something went wrong");setStatus("error");}
+  }
+  const personName=(id)=>people.find(p=>p.id===id)?.name||id;
+  const suggestions=["Had coffee with someone today","Just met a new person","Update a birthday"];
+
+  return(
+    <div style={{position:"absolute",inset:0,background:"rgba(245,240,235,0.65)",backdropFilter:"blur(8px)",zIndex:35,display:"flex",alignItems:"flex-end"}}>
+      <div style={{width:"100%",background:P.surface,borderRadius:"28px 28px 0 0",border:`1.5px solid #E8D8F0`,borderBottom:"none",boxShadow:`0 -4px 24px ${P.shadow}`,paddingBottom:44}}>
+        <div style={{width:40,height:4,background:P.handleBar,borderRadius:2,margin:"12px auto 12px"}}/>
+
+        {/* AI avatar + title */}
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"0 16px",marginBottom:6}}>
+          <div style={{width:28,height:28,borderRadius:"50%",background:`linear-gradient(135deg,${P.aiIcon1},${P.aiIcon2})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0}}>✦</div>
+          <div style={{fontSize:16,fontWeight:700,color:P.text}}>Tell me anything</div>
+        </div>
+        <div style={{fontSize:13,color:P.muted,padding:"0 16px",marginBottom:12}}>I'll figure out who it's about and save it.</div>
+
+        {/* Mic listening indicator */}
+        {listening&&<div style={{margin:"0 16px 10px",padding:"9px 14px",background:"#FBD0D020",border:`1.5px solid ${P.nudgeBorder}`,borderRadius:14,fontSize:13,color:P.youText,display:"flex",alignItems:"center",gap:8}}>
+          <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:P.nudgeDot,animation:"pulse 1s infinite"}}/>Listening… speak now
+        </div>}
+        <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
+
+        {/* Result / thinking */}
+        {status==="thinking"&&<div style={{textAlign:"center",padding:"12px 16px",color:P.muted,fontSize:14}}>✦ Thinking…</div>}
+        {status==="done"&&result!==null&&(
+          <div style={{margin:"0 16px 12px",padding:"10px 14px",background:"#F0FBF4",borderRadius:14,border:`1.5px solid #C8E6D1`}}>
+            {result.length===0?<div style={{fontSize:13,color:P.muted}}>Couldn't match anyone — try being more specific.</div>:result.map((a,i)=>(
+              <div key={i} style={{fontSize:13,color:P.text,padding:"3px 0"}}>✓ {a.type==="about"?`Note for ${personName(a.personId)}: "${a.text}"`:a.type==="birthday"?`Birthday for ${personName(a.personId)}: ${a.date}`:`${a.fieldLabel} for ${personName(a.personId)}: ${a.value}`}</div>
+            ))}
+          </div>
+        )}
+        {status==="error"&&<div style={{margin:"0 16px 12px",padding:"10px 14px",background:P.dangerLight,borderRadius:14,border:`1.5px solid ${P.danger}40`,fontSize:13,color:P.danger}}>{errMsg}</div>}
+
+        {/* Action chips (after done) */}
+        {status==="done"&&(
+          <div style={{display:"flex",gap:8,padding:"0 16px",marginBottom:12}}>
+            <button onClick={()=>{setText("");setStatus("idle");setResult(null);setErrMsg("");}} style={{flex:1,padding:"8px 0",background:P.inputBg,border:`1.5px solid ${P.border}`,borderRadius:10,fontSize:13,fontWeight:600,color:P.text,cursor:"pointer",fontFamily:"inherit"}}>Tell me more</button>
+            <button onClick={onCancel} style={{flex:1,padding:"8px 0",background:P.btnPrimary,border:"none",borderRadius:10,fontSize:13,fontWeight:600,color:P.btnPrimaryText,cursor:"pointer",fontFamily:"inherit"}}>Done ✓</button>
+          </div>
+        )}
+
+        {/* Suggestion chips */}
+        {status==="idle"&&!text&&(
+          <div style={{display:"flex",flexDirection:"column",gap:6,padding:"0 16px",marginBottom:12}}>
+            {suggestions.map(s=>(
+              <button key={s} onClick={()=>{setText(s);setTimeout(()=>textareaRef.current?.focus(),50);}} style={{background:P.inputBg,border:`1.5px solid #E0D0F0`,borderRadius:14,padding:"9px 14px",fontSize:13,color:"#5A3A80",cursor:"pointer",textAlign:"left",fontFamily:"inherit",lineHeight:1.4}}>💡 {s}</button>
+            ))}
+          </div>
+        )}
+
+        {/* Input row */}
+        {status!=="done"&&(
+          <div style={{display:"flex",alignItems:"flex-end",gap:10,padding:"0 16px"}}>
+            <textarea ref={textareaRef} value={text} onChange={e=>setText(e.target.value)} placeholder="Tell me about someone…" rows={2} autoFocus disabled={status==="thinking"||listening} style={{...inp,resize:"none",lineHeight:1.5,borderColor:listening?"#F39393":"#D9C3F4",flex:1,transition:"border-color 0.2s"}} onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&(e.preventDefault(),send())}/>
+            <button onClick={send} disabled={!text.trim()||status==="thinking"} style={{width:44,height:44,borderRadius:14,background:P.btnPrimary,border:"none",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:P.btnPrimaryText,flexShrink:0,cursor:"pointer",opacity:!text.trim()||status==="thinking"?0.4:1}}>↑</button>
+          </div>
+        )}
+
+        {status!=="done"&&<button onClick={onCancel} style={{width:"100%",padding:"12px 0",background:"transparent",color:P.muted,border:"none",fontSize:14,cursor:"pointer",fontFamily:"inherit",marginTop:10}}>Cancel</button>}
+      </div>
+    </div>
+  );
+}
+
+// ===== Main App =====
+function MainApp(){
+  const containerRef=useRef(null);
+  const[dims,setDims]=useState({width:window.innerWidth,height:window.innerHeight});
+  // Use visualViewport height when available (excludes mobile browser chrome)
+  useEffect(()=>{
+    function updateDims(){
+      const vv=window.visualViewport;
+      setDims({width:vv?vv.width:window.innerWidth,height:vv?vv.height:window.innerHeight});
+    }
+    updateDims();
+    const vv=window.visualViewport;
+    if(vv){vv.addEventListener("resize",updateDims);}
+    else{window.addEventListener("resize",updateDims);}
+    return()=>{const vv=window.visualViewport;if(vv)vv.removeEventListener("resize",updateDims);else window.removeEventListener("resize",updateDims);};
+  },[]);
+  const[loading,setLoading]=useState(true);
+  const[loadError,setLoadError]=useState(null);
+  const[saving,setSaving]=useState(false);
+  const[nodes,setNodes]=useState([{id:"me",name:"You",type:"me"}]);
+  const[links,setLinks]=useState([]);
+  const[fieldDefs,setFieldDefs]=useState([]);
+  const[navStack,setNavStack]=useState([]);
+  const[centerId,setCenterId]=useState("me");
+  const[activeCardId,setActiveCardId]=useState(null);
+  const[showMeCard,setShowMeCard]=useState(false);
+  const[showQuickNote,setShowQuickNote]=useState(false);
+  const[showAIChat,setShowAIChat]=useState(false);
+  const[addModalCenter,setAddModalCenter]=useState(null);
+  const[showAddCategory,setShowAddCategory]=useState(false);
+  const[editMode,setEditMode]=useState(false);
+  const[editSheetNode,setEditSheetNode]=useState(null);
+  const[search,setSearch]=useState("");
+  const[showUncategorized,setShowUncategorized]=useState(false);
+  const[newNodeId,setNewNodeId]=useState(null);
+  const[activeReminders,setActiveReminders]=useState([]);
+
+  useEffect(()=>{const el=containerRef.current;if(!el)return;const obs=new ResizeObserver(entries=>{const{width,height}=entries[0].contentRect;setDims({width,height});});obs.observe(el);return()=>obs.disconnect();},[]);
+
+  async function loadData(){
+    setLoading(true);setLoadError(null);
+    try{
+      const data=await callBackend("getAllData");
+      const seenNames=new Set();
+      const people=(data.people||[]).map(p=>({...p,type:"person",about:p.about||[],customValues:p.customValues||{},importantFieldIds:p.importantFieldIds||[],photo:p.imageUrl||null})).filter(p=>{const key=p.name?.trim().toLowerCase();if(!key||seenNames.has(key))return false;seenNames.add(key);return true;});
+      const savedCatColors=JSON.parse(localStorage.getItem("catColors")||"{}");
+      const cats=(data.categories||[]).map(c=>({
+        id:c.name,name:c.name,type:"category",
+        color:c.color||savedCatColors[c.name]||DEFAULT_CAT_COLORS[c.name]||hashColor(c.name),
+        imageUrl:c.imageUrl
+      }));
+      const meNode={id:"me",name:"You",type:"me"};
+      const allPeople=[meNode,...cats,...people];
+      setNodes(allPeople);
+      const rels=(data.relationships||[]).map(r=>({source:r.personA,target:r.personB,type:r.type}));
+      const catLinks=cats.map(c=>({source:"me",target:c.id,type:"circle"}));
+      const peopleLinks=[];
+      people.forEach(p=>{
+        // Filter out garbage values like "[]" that come from the sheet
+        const pCats=(p.categories||[]).filter(c=>c&&c!=="[]"&&c!=="null"&&c.trim()!=="");
+        pCats.forEach(catName=>{const cat=cats.find(c=>c.name===catName);if(cat)peopleLinks.push({source:cat.id,target:p.id,type:catName.toLowerCase()});});
+        // allow multiple categories — if none, link directly to me
+        if(pCats.length===0){peopleLinks.push({source:"me",target:p.id,type:"person"});}
+      });
+      setLinks([...catLinks,...rels,...peopleLinks]);
+      setFieldDefs((data.fieldDefs||[]).map(f=>({...f,important:f.important===true||f.important==="TRUE"||f.important==="true"})));
+      const allReminders=getReminders(allPeople,data.fieldDefs||[]);
+      setActiveReminders(allReminders.filter(isReminderActive));
+    }catch(err){setLoadError(err.message||"Couldn't reach your Google Sheet.");}
+    finally{setLoading(false);}
+  }
+  useEffect(()=>{loadData();},[]);
+
+  const isDesktop=dims.width>=768;
+  const isHome=navStack.length===0&&centerId==="me";
+  const centerNode=nodes.find(n=>n.id===centerId);
+  const activePerson=nodes.find(n=>n.id===activeCardId);
+  const meNode=nodes.find(n=>n.id==="me");
+  const birthdays=upcomingBirthdays(nodes,30);
+  const stats={people:nodes.filter(n=>n.type==="person").length,categories:nodes.filter(n=>n.type==="category").length,connections:links.filter(l=>l.type!=="circle").length,about:nodes.filter(n=>n.type==="person").reduce((s,n)=>s+(n.about?.length||0),0)};
+  const uncategorizedPeople=nodes.filter(n=>{if(n.type!=="person")return false;return !links.some(l=>{const otherId=l.source===n.id?l.target:l.target===n.id?l.source:null;return otherId&&nodes.find(x=>x.id===otherId)?.type==="category";});});
+  const panelWidth=isDesktop&&activePerson?320:0;
+  const graphWidth=dims.width-panelWidth;
+  const bannerHeight=activeReminders.length>0?100:0;
+  // Bottom bar height: home has search+AI bar (~130px), non-home has add-person button (~90px)
+  const BOTTOM_BAR_H=isHome?130:90;
+  const TOP_BAR_H=isHome?0:56; // breadcrumb bar on non-home views
+  const graphHeight=dims.height-BOTTOM_BAR_H-TOP_BAR_H-bannerHeight;
+
+  function onNodeTap(node){
+    if(editMode){
+      if(node.type==="person"){setActiveCardId(node.id);return;}
+      setEditSheetNode(node);return;
+    }
+    if(node.type==="person"){setActiveCardId(node.id);return;}
+    setNavStack(s=>[...s,centerId]);setCenterId(node.id);setActiveCardId(null);setShowMeCard(false);
+  }
+  function onCenterTap(node){if(node.id==="me"){setShowMeCard(true);return;}if(node.type==="person"){setActiveCardId(node.id);}}
+  function navigateTo(nodeId){setNavStack(s=>[...s,centerId]);setCenterId(nodeId);setActiveCardId(null);setShowMeCard(false);}
+  function goBack(){
+    if(editMode){setEditMode(false);return;}
+    if(activeCardId&&!isDesktop){setActiveCardId(null);return;}
+    if(showMeCard){setShowMeCard(false);return;}
+    if(navStack.length>0){const prev=navStack[navStack.length-1];setNavStack(s=>s.slice(0,-1));setCenterId(prev);}
+  }
+  function handleDismissReminder(id){dismissReminder(id);setActiveReminders(r=>r.filter(x=>x.id!==id));}
+  function handleSnoozeReminder(id){snoozeReminder(id);setActiveReminders(r=>r.filter(x=>x.id!==id));}
+
+  async function updatePerson(id,patch){
+    if(patch._newConn){setLinks(prev=>[...prev,{source:id,target:patch._newConn.target,type:patch._newConn.type}]);setSaving(true);try{await callBackend("addRelationship",{personA:id,personB:patch._newConn.target,type:patch._newConn.type});}catch(e){console.error(e);}finally{setSaving(false);}return;}
+    if(patch._removeDirectLink){setLinks(prev=>prev.filter(l=>!((l.source===id&&l.target==="me")||(l.target===id&&l.source==="me"))));return;}
+    if(patch._newPerson){
+      const{name,connType}=patch._newPerson;setSaving(true);
+      try{
+        const res=await callBackend("addPerson",{name,categories:[]});const newId=res.id;
+        setNodes(prev=>[...prev,{id:newId,name,type:"person",birthday:"",about:[],customValues:{},importantFieldIds:[],photo:null}]);
+        setLinks(prev=>[...prev,{source:"me",target:newId,type:"person"},{source:id,target:newId,type:connType}]);
+        await callBackend("addRelationship",{personA:id,personB:newId,type:connType});
+      }catch(e){console.error(e);}finally{setSaving(false);}
+      return;
+    }
+    setNodes(prev=>prev.map(n=>n.id===id?{...n,...patch}:n));
+    if(id==="me")return;
+    setSaving(true);
+    try{
+      await callBackend("updatePerson",{id,...(patch.name?{name:patch.name}:{}),...(patch.birthday!==undefined?{birthDate:patch.birthday}:{})});
+      if(patch.customValues){for(const[fieldId,value]of Object.entries(patch.customValues)){await callBackend("setFieldValue",{personId:id,fieldId,value});}}
+      if(patch.about){const existing=nodes.find(n=>n.id===id)?.about||[];const newEntries=patch.about.filter(e=>!existing.some(x=>x.date===e.date&&x.text===e.text));for(const entry of newEntries){await callBackend("addAbout",{personId:id,date:entry.date,text:entry.text});}}
+    }catch(e){console.error(e);}finally{setSaving(false);}
+  }
+  async function deletePerson(id){setNodes(prev=>prev.filter(n=>n.id!==id));setLinks(prev=>prev.filter(l=>l.source!==id&&l.target!==id));setActiveCardId(null);if(centerId===id){const prev=navStack[navStack.length-1]||"me";setNavStack(s=>s.slice(0,-1));setCenterId(prev);}}
+  async function deleteCategory(id){setNodes(prev=>prev.filter(n=>n.id!==id));setLinks(prev=>prev.filter(l=>l.source!==id&&l.target!==id));if(centerId===id){const prev=navStack[navStack.length-1]||"me";setNavStack(s=>s.slice(0,-1));setCenterId(prev);}}
+
+  function renameNode(id, newName, isCategory) {
+    setNodes(prev=>prev.map(n=>n.id===id?{...n,name:newName}:n));
+    if(isCategory){
+      // update links that reference the old id by name
+      setLinks(prev=>prev.map(l=>({...l,source:l.source===id?id:l.source,target:l.target===id?id:l.target})));
+    } else {
+      updatePerson(id,{name:newName});
+    }
+  }
+  function changeCategoryColor(id, color) {
+    setNodes(prev=>prev.map(n=>n.id===id?{...n,color}:n));
+    // save to localStorage as reliable fallback
+    try{const saved=JSON.parse(localStorage.getItem("catColors")||"{}");saved[id]=color;localStorage.setItem("catColors",JSON.stringify(saved));}catch(e){}
+    // also try to persist to backend
+    callBackend("updateCategory",{id,color}).catch(()=>{});
+  }
+
+  async function addPerson(name){
+    setSaving(true);
+    try{
+      const res=await callBackend("addPerson",{name,categories:[]});const id=res.id;
+      setNodes(prev=>[...prev,{id,name,type:"person",birthday:"",about:[],customValues:{},importantFieldIds:[],photo:null}]);
+      if(addModalCenter&&addModalCenter.id!=="me"&&addModalCenter.type==="category"){setLinks(prev=>[...prev,{source:addModalCenter.id,target:id,type:addModalCenter.name.toLowerCase()}]);}
+      setNewNodeId(id);setAddModalCenter(null);
+      setTimeout(()=>{setActiveCardId(id);},100);setTimeout(()=>setNewNodeId(null),2000);
+    }catch(e){console.error(e);}finally{setSaving(false);}
+  }
+  async function addCategory(name, color){
+    setSaving(true);
+    try{
+      await callBackend("addCategory",{name,color});
+      const newCat={id:name,name,type:"category",color:color||DEFAULT_CAT_COLORS[name]||hashColor(name)};
+      setNodes(prev=>[...prev,newCat]);setLinks(prev=>[...prev,{source:"me",target:name,type:"circle"}]);
+      setShowAddCategory(false);
+    }catch(e){console.error(e);}finally{setSaving(false);}
+  }
+  async function saveQuickNote(personId,entry){setNodes(prev=>prev.map(n=>n.id===personId?{...n,about:[...n.about,entry]}:n));setShowQuickNote(false);setSaving(true);try{await callBackend("addAbout",{personId,date:entry.date,text:entry.text});}catch(e){console.error(e);}finally{setSaving(false);}}
+  async function addFieldDef(def){setFieldDefs(prev=>[...prev,def]);try{await callBackend("addFieldDef",{label:def.label,type:def.type,important:false});}catch(e){console.error(e);}}
+
+  async function handleAISave(action){
+    if(action.type==="about"){const entry={date:action.date||new Date().toISOString().slice(0,10),text:action.text};setNodes(prev=>prev.map(n=>n.id===action.personId?{...n,about:[...(n.about||[]),entry]}:n));await callBackend("addAbout",{personId:action.personId,date:entry.date,text:entry.text});}
+    else if(action.type==="birthday"){setNodes(prev=>prev.map(n=>n.id===action.personId?{...n,birthday:action.date}:n));await callBackend("updatePerson",{id:action.personId,birthDate:action.date});}
+    else if(action.type==="field"){let fd=fieldDefs.find(f=>f.label.toLowerCase()===action.fieldLabel.toLowerCase());if(!fd){const newId="f"+Date.now();fd={id:newId,label:action.fieldLabel,type:"text"};setFieldDefs(prev=>[...prev,fd]);await callBackend("addFieldDef",{label:fd.label,type:"text",important:false});}setNodes(prev=>prev.map(n=>n.id===action.personId?{...n,customValues:{...(n.customValues||{}),[fd.id]:action.value}}:n));await callBackend("setFieldValue",{personId:action.personId,fieldId:fd.id,value:action.value});}
+  }
+
+  function buildBreadcrumb(targetId){if(targetId==="me")return[];const path=[targetId];let current=targetId;const visited=new Set([current]);for(let i=0;i<10;i++){const pl=links.find(l=>{if(l.target===current&&!visited.has(l.source))return true;if(l.source===current&&!visited.has(l.target))return true;return false;});if(!pl)break;const pid=pl.source===current?pl.target:pl.source;visited.add(pid);path.unshift(pid);if(pid==="me")break;current=pid;}return path;}
+  const breadcrumb=centerId==="me"?[]:buildBreadcrumb(centerId);
+  const searchResults=search.trim()?nodes.filter(n=>n.type==="person"&&n.name.toLowerCase().includes(search.toLowerCase())):[];
+
+  if(loading)return <LoadingScreen/>;
+  if(loadError)return <ErrorScreen message={loadError} onRetry={loadData}/>;
+
+  return(
+    <div ref={containerRef} style={{width:"100%",height:"100dvh",background:P.bg,color:P.text,fontFamily:"'Inter','Segoe UI',sans-serif",position:"relative",overflow:"hidden"}}>
+      {dims.width>0&&<Graph
+        centerId={centerId} allNodes={nodes} allLinks={links}
+        onNodeTap={onNodeTap} onCenterTap={onCenterTap}
+        width={graphWidth||dims.width} height={graphHeight||dims.height}
+        twoLevel={isHome} newNodeId={newNodeId} selectedId={activeCardId}
+        editMode={editMode} onEditNode={setEditSheetNode}
+      />}
+      {saving&&<div style={{position:"absolute",top:12,right:12,fontSize:11,color:P.muted,background:P.surface,padding:"4px 10px",borderRadius:8,zIndex:50,border:`1.5px solid ${P.border}`,boxShadow:`0 1px 4px ${P.shadow}`}}>Saving…</div>}
+
+      {/* Reminder Banner */}
+      {activeReminders.length>0&&<ReminderBanner reminders={activeReminders} onDismiss={handleDismissReminder} onSnooze={handleSnoozeReminder} onPersonClick={(personId)=>{setActiveCardId(personId);}}/>}
+
+      {/* Top bar */}
+      <div style={{position:"absolute",top:activeReminders.length>0?bannerHeight:0,left:0,right:isDesktop&&activePerson?320:0,padding:"14px 20px",display:"flex",alignItems:"center",gap:10,background:`linear-gradient(to bottom, ${P.gradTop} 60%, transparent)`,zIndex:10,transition:"top 0.3s ease"}}>
+        {!isHome&&<button onClick={goBack} style={{width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.text,fontSize:15,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:`0 1px 4px ${P.shadow}`}}>←</button>}
+        <div style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:P.muted,flex:1,overflow:"hidden"}}>
+          {!isHome&&breadcrumb.map((id,i)=>{const n=nodes.find(x=>x.id===id);const label=id==="me"?"You":(n?.name?.split(" ")[0]||id);const isLast=i===breadcrumb.length-1;return(<span key={i} style={{display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap"}}>{isLast?<span style={{color:P.text,fontWeight:600}}>{label}</span>:<button onClick={()=>{setNavStack(breadcrumb.slice(0,i));setCenterId(id);setActiveCardId(null);setShowMeCard(false);}} style={{background:"none",border:"none",cursor:"pointer",color:P.muted,fontSize:13,padding:0,fontFamily:"inherit",textDecoration:"underline",textDecorationColor:P.border}}>{label}</button>}{!isLast&&<span style={{opacity:0.4}}>→</span>}</span>);})}
+          {isHome&&<span style={{fontSize:15,fontWeight:700,color:P.text}}>My people</span>}
+        </div>
+        {/* Edit mode toggle */}
+        <button onClick={()=>{setEditMode(e=>!e);setEditSheetNode(null);}} style={{width:34,height:34,borderRadius:10,background:editMode?"#FAE0E0":P.surface,border:`1.5px solid ${editMode?P.youStroke:P.border}`,color:editMode?P.youText:P.muted,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`,fontWeight:700}}>✎</button>
+        {!editMode&&centerNode?.type==="person"&&<button onClick={()=>setActiveCardId(centerNode.id)} style={{width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.muted,fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`}}>👤</button>}
+        {!editMode&&<button onClick={()=>setAddModalCenter(centerNode||nodes.find(n=>n.id==="me"))} style={{width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.text,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`}}>+</button>}
+        {!editMode&&isHome&&<button onClick={()=>setShowAddCategory(true)} style={{width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.muted,fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`}}>⊕</button>}
+        {!editMode&&isHome&&uncategorizedPeople.length>0&&<button onClick={()=>setShowUncategorized(true)} style={{position:"relative",width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.muted,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`}}>👤<span style={{position:"absolute",top:-5,right:-5,background:P.youStroke,color:"white",borderRadius:"50%",width:16,height:16,fontSize:9,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center"}}>{uncategorizedPeople.length}</span></button>}
+      </div>
+
+      {/* Edit mode banner */}
+      {editMode&&(
+        <div style={{position:"absolute",bottom:0,left:0,right:0,padding:"14px 20px 40px",background:`linear-gradient(to top, ${P.gradBot} 60%, transparent)`,zIndex:10}}>
+          <div style={{background:"#FAE0E0",border:`1.5px solid ${P.youStroke}`,borderRadius:16,padding:"12px 16px",textAlign:"center"}}>
+            <div style={{fontSize:14,fontWeight:600,color:P.youText,marginBottom:4}}>✎ Edit mode</div>
+            <div style={{fontSize:13,color:P.muted}}>Tap any node to rename, recolor or delete it</div>
+          </div>
+        </div>
+      )}
+
+      {/* Home bottom bar */}
+      {isHome&&!editMode&&(
+        <div style={{position:"absolute",bottom:0,left:0,right:0,padding:"14px 20px 40px",background:`linear-gradient(to top, ${P.gradBot} 65%, transparent)`,zIndex:10}}>
+          {/* Birthdays */}
+          {birthdays.length>0&&(
+            <div style={{marginBottom:10,background:`linear-gradient(135deg,#FBD0D020,#D9C3F420)`,borderRadius:14,padding:"10px 14px",border:`1.5px solid ${P.border}`,boxShadow:`0 2px 8px ${P.shadow}`}}>
+              <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.1em",color:P.muted,textTransform:"uppercase",marginBottom:8}}>🎂 Upcoming birthdays</div>
+              {birthdays.map(({node:n,daysUntil})=>(
+                <div key={n.id} onClick={()=>{setActiveCardId(n.id);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",cursor:"pointer",borderBottom:`1px solid ${P.borderSoft}`}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{width:22,height:22,borderRadius:"50%",background:`${personBaseColor(n.id,links,nodes)}25`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:personBaseColor(n.id,links,nodes)}}>{n.name[0]}</div>
+                    <span style={{fontSize:13,color:P.text}}>{n.name.split(" ")[0]}</span>
+                  </div>
+                  <span style={{fontSize:12,color:P.muted}}>{daysUntil===0?"Today!":daysUntil===1?"Tomorrow":`In ${daysUntil} days`}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Nudge pill — show first upcoming nudge if no search */}
+          {!search&&(()=>{
+            // find the person with longest time since last contact
+            const candidates=nodes.filter(n=>n.type==="person"&&daysSinceLastAbout(n)!==null);
+            if(candidates.length===0)return null;
+            const person=candidates.sort((a,b)=>(daysSinceLastAbout(b)||0)-(daysSinceLastAbout(a)||0))[0];
+            const days=daysSinceLastAbout(person);
+            if(!days||days<14)return null;
+            return(
+              <div onClick={()=>setActiveCardId(person.id)} style={{display:"flex",alignItems:"center",gap:10,background:P.nudgeBg,border:`1.5px solid ${P.nudgeBorder}`,borderRadius:16,padding:"10px 14px",marginBottom:10,cursor:"pointer",boxShadow:`0 2px 8px ${P.shadow}`}}>
+                <div style={{width:8,height:8,borderRadius:"50%",background:P.nudgeDot,flexShrink:0}}/>
+                <div style={{fontSize:13,color:P.text,fontWeight:500,flex:1,lineHeight:1.35}}>You haven't talked to <strong>{person.name.split(" ")[0]}</strong> in {days} days 👋</div>
+                <span style={{fontSize:14,color:P.muted}}>›</span>
+              </div>
+            );
+          })()}
+
+
+          {/* Search bar + floating results */}
+          {search!==undefined&&(
+            <div style={{position:"relative",marginBottom:8}}>
+              {/* Floating search results — appear ABOVE the bar, don't push layout */}
+              {searchResults.length>0&&(
+                <div style={{position:"absolute",bottom:"100%",left:0,right:0,marginBottom:6,background:P.surface,border:`1.5px solid ${P.border}`,borderRadius:14,overflow:"hidden",boxShadow:`0 -4px 16px ${P.shadow}`,zIndex:20,maxHeight:240,overflowY:"auto"}}>
+                  {searchResults.map(n=><div key={n.id} onClick={()=>{setSearch("");setActiveCardId(n.id);}} style={{padding:"11px 16px",borderBottom:`1px solid ${P.borderSoft}`,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:10,color:P.text,background:P.surface}}>
+                    <div style={{width:28,height:28,borderRadius:"50%",background:`${personBaseColor(n.id,links,nodes)}25`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:personBaseColor(n.id,links,nodes)}}>{n.name[0]}</div>
+                    {n.name}
+                  </div>)}
+                </div>
+              )}
+              <div style={{display:"flex",alignItems:"center",gap:8,background:P.surface,border:`1.5px solid ${search?P.selected:P.border}`,borderRadius:16,padding:"8px 14px",boxShadow:`0 1px 6px ${P.shadow}`,transition:"border-color 0.2s"}}>
+                <span style={{fontSize:14,color:P.muted,flexShrink:0}}>🔍</span>
+                <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search people…" style={{flex:1,background:"transparent",border:"none",outline:"none",fontSize:14,color:P.text,fontFamily:"inherit"}}/>
+                {search&&<button onClick={()=>setSearch("")} style={{background:"none",border:"none",color:P.muted,fontSize:16,cursor:"pointer",padding:0,lineHeight:1}}>✕</button>}
+              </div>
+            </div>
+          )}
+          {/* AI chat bar */}
+          <div onClick={()=>setShowAIChat(true)} style={{display:"flex",alignItems:"center",gap:10,background:P.aiBarBg,border:`1.5px solid ${P.aiBarBorder}`,borderRadius:20,padding:"10px 14px",boxShadow:`0 2px 16px rgba(180,140,220,0.13)`,cursor:"pointer"}}>
+            <div style={{width:30,height:30,borderRadius:"50%",background:`linear-gradient(135deg,${P.aiIcon1},${P.aiIcon2})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>✦</div>
+            <div style={{flex:1,fontSize:14,color:P.muted,userSelect:"none"}}>Tell me about someone…</div>
+          </div>
+        </div>
+      )}
+
+      {/* Non-home bottom: quick add */}
+      {!isHome&&!editMode&&(
+        <div style={{position:"absolute",bottom:0,left:0,right:0,padding:"14px 20px 40px",background:`linear-gradient(to top, ${P.gradBot} 60%, transparent)`,zIndex:10}}>
+          <div style={{display:"flex",gap:8}}>
+            {centerNode?.type==="person"
+              ? <button onClick={()=>setActiveCardId(centerNode.id)} style={{...pbtn("primary"),flex:1,fontSize:15,padding:13,borderRadius:14,boxShadow:`0 2px 8px ${P.shadow}`}}>✎ Edit {centerNode.name.split(" ")[0]}</button>
+              : <button onClick={()=>setAddModalCenter(centerNode||nodes.find(n=>n.id==="me"))} style={{...pbtn("primary"),flex:1,fontSize:15,padding:13,borderRadius:14,boxShadow:`0 2px 8px ${P.shadow}`}}>+ Add person</button>
+            }
+            <button onClick={()=>setShowAIChat(true)} style={{width:50,height:50,borderRadius:14,background:P.aiBarBg,border:`1.5px solid ${P.aiBarBorder}`,color:P.text,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:`0 2px 8px ${P.shadow}`}}>✦</button>
+          </div>
+        </div>
+      )}
+
+      {showUncategorized&&<UncategorizedDrawer people={uncategorizedPeople} allNodes={nodes} allLinks={links} onClose={()=>setShowUncategorized(false)} onSelectPerson={id=>{setActiveCardId(id);}}/>}
+      {showMeCard&&(<><div onClick={()=>setShowMeCard(false)} style={{position:"absolute",inset:0,zIndex:15}}/><MeCard me={meNode} stats={stats} allNodes={nodes} onClose={()=>setShowMeCard(false)} onUpdate={updatePerson}/></>)}
+      {activePerson&&(<>{!isDesktop&&<div onClick={()=>setActiveCardId(null)} style={{position:"absolute",inset:0,zIndex:15,background:"rgba(61,32,48,0.15)"}}/>}<PersonCard person={nodes.find(n=>n.id===activeCardId)||activePerson} allNodes={nodes} allLinks={links} fieldDefs={fieldDefs} onClose={()=>setActiveCardId(null)} onNavigate={navigateTo} onUpdate={updatePerson} onAddFieldDef={addFieldDef} onDelete={deletePerson} isSidePanel={isDesktop} saving={saving}/></>)}
+      {showQuickNote&&<QuickNoteModal allNodes={nodes} onSave={saveQuickNote} onCancel={()=>setShowQuickNote(false)}/>}
+      {showAIChat&&<AIChatModal allNodes={nodes} onSave={handleAISave} onCancel={()=>setShowAIChat(false)}/>}
+      {addModalCenter&&<AddPersonModal centerNode={addModalCenter} allNodes={nodes} onSave={addPerson} onOpenExisting={id=>{setAddModalCenter(null);setActiveCardId(id);}} onCancel={()=>setAddModalCenter(null)}/>}
+      {showAddCategory&&<AddCategoryModal onSave={addCategory} onCancel={()=>setShowAddCategory(false)}/>}
+      {editSheetNode&&<EditSheet node={editSheetNode} allNodes={nodes} onClose={()=>setEditSheetNode(null)} onRename={renameNode} onChangeColor={changeCategoryColor} onDeleteCategory={deleteCategory} onDeletePerson={deletePerson} onAddPerson={n=>{setAddModalCenter(n);}}/>}
+    </div>
+  );
+}
+
+// ===== Root =====
+function Root(){const[unlocked,setUnlocked]=useState(localStorage.getItem(LS_UNLOCKED)==="1");if(!unlocked)return <LockScreen onUnlock={()=>setUnlocked(true)}/>;return <MainApp/>;}
+ReactDOM.createRoot(document.getElementById("root")).render(<Root/>);
+</script>
+</body>
+</html>
