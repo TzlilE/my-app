@@ -905,12 +905,7 @@ function MainApp(){
 
   function onNodeTap(node){
     if(editMode){setEditSheetNode(node);return;}
-    if(node.type==="person"){
-      // open card directly, no navigation
-      setActiveCardId(node.id);
-    } else {
-      setNavStack(s=>[...s,centerId]);setCenterId(node.id);setActiveCardId(null);setShowMeCard(false);
-    }
+    setNavStack(s=>[...s,centerId]);setCenterId(node.id);setActiveCardId(null);setShowMeCard(false);
   }
   function onCenterTap(node){if(node.id==="me"){setShowMeCard(true);return;}if(node.type==="person"){setActiveCardId(node.id);}}
   function navigateTo(nodeId){setNavStack(s=>[...s,centerId]);setCenterId(nodeId);setActiveCardId(null);setShowMeCard(false);}
@@ -1112,7 +1107,10 @@ function MainApp(){
       {!isHome&&!editMode&&(
         <div style={{position:"absolute",bottom:0,left:0,right:0,padding:"14px 20px 40px",background:`linear-gradient(to top, ${P.gradBot} 60%, transparent)`,zIndex:10}}>
           <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>setAddModalCenter(centerNode||nodes.find(n=>n.id==="me"))} style={{...pbtn("primary"),flex:1,fontSize:15,padding:13,borderRadius:14,boxShadow:`0 2px 8px ${P.shadow}`}}>+ Add person</button>
+            {centerNode?.type==="person"
+              ? <button onClick={()=>setActiveCardId(centerNode.id)} style={{...pbtn("primary"),flex:1,fontSize:15,padding:13,borderRadius:14,boxShadow:`0 2px 8px ${P.shadow}`}}>✎ Edit {centerNode.name.split(" ")[0]}</button>
+              : <button onClick={()=>setAddModalCenter(centerNode||nodes.find(n=>n.id==="me"))} style={{...pbtn("primary"),flex:1,fontSize:15,padding:13,borderRadius:14,boxShadow:`0 2px 8px ${P.shadow}`}}>+ Add person</button>
+            }
             <button onClick={()=>setShowAIChat(true)} style={{width:50,height:50,borderRadius:14,background:P.aiBarBg,border:`1.5px solid ${P.aiBarBorder}`,color:P.text,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:`0 2px 8px ${P.shadow}`}}>✦</button>
           </div>
         </div>
