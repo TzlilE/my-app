@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"/>
 <title>My people</title>
-<style>* { box-sizing: border-box; margin: 0; padding: 0; } body { background: #F5F0EB; }</style>
+<style>* { box-sizing: border-box; margin: 0; padding: 0; } body { background: #F5F0EB; height: 100dvh; overflow: hidden; } #root { height: 100dvh; overflow: hidden; }</style>
 </head>
 <body>
 <div id="root"></div>
@@ -820,6 +820,18 @@ function AIChatModal({allNodes, onSave, onCancel}) {
 function MainApp(){
   const containerRef=useRef(null);
   const[dims,setDims]=useState({width:window.innerWidth,height:window.innerHeight});
+  // Use visualViewport height when available (excludes mobile browser chrome)
+  useEffect(()=>{
+    function updateDims(){
+      const vv=window.visualViewport;
+      setDims({width:vv?vv.width:window.innerWidth,height:vv?vv.height:window.innerHeight});
+    }
+    updateDims();
+    const vv=window.visualViewport;
+    if(vv){vv.addEventListener("resize",updateDims);}
+    else{window.addEventListener("resize",updateDims);}
+    return()=>{const vv=window.visualViewport;if(vv)vv.removeEventListener("resize",updateDims);else window.removeEventListener("resize",updateDims);};
+  },[]);
   const[loading,setLoading]=useState(true);
   const[loadError,setLoadError]=useState(null);
   const[saving,setSaving]=useState(false);
