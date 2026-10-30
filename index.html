@@ -504,9 +504,9 @@ function PersonCard({person,allNodes,allLinks,fieldDefs,onClose,onNavigate,onUpd
           const currentCatIds=new Set(personCats.map(c=>c.id));
           const filteredCats=allCats.filter(c=>!currentCatIds.has(c.id)&&(!catInput.trim()||c.name.toLowerCase().includes(catInput.toLowerCase())));
           function assignCategory(cat){
-            // Add link in state
-            const newLink={source:person.id,target:cat.id,type:"member"};
             onUpdate(person.id,{_newConn:{target:cat.id,type:"member"}});
+            // Remove direct me→person link so they leave the main graph
+            onUpdate(person.id,{_removeDirectLink:true});
             setCatInput("");setShowCatDropdown(false);
           }
           return(
@@ -1003,6 +1003,7 @@ function MainApp(){
 
   async function updatePerson(id,patch){
     if(patch._newConn){setLinks(prev=>[...prev,{source:id,target:patch._newConn.target,type:patch._newConn.type}]);setSaving(true);try{await callBackend("addRelationship",{personA:id,personB:patch._newConn.target,type:patch._newConn.type});}catch(e){console.error(e);}finally{setSaving(false);}return;}
+    if(patch._removeDirectLink){setLinks(prev=>prev.filter(l=>!((l.source===id&&l.target==="me")||(l.target===id&&l.source==="me"))));return;}
     setNodes(prev=>prev.map(n=>n.id===id?{...n,...patch}:n));
     if(id==="me")return;
     setSaving(true);
