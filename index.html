@@ -861,9 +861,10 @@ function MainApp(){
       const data=await callBackend("getAllData");
       const seenNames=new Set();
       const people=(data.people||[]).map(p=>({...p,about:p.about||[],customValues:p.customValues||{},importantFieldIds:p.importantFieldIds||[],photo:p.imageUrl||null})).filter(p=>{const key=p.name?.trim().toLowerCase();if(!key||seenNames.has(key))return false;seenNames.add(key);return true;});
+      const savedCatColors=JSON.parse(localStorage.getItem("catColors")||"{}");
       const cats=(data.categories||[]).map(c=>({
         id:c.name,name:c.name,type:"category",
-        color:c.color||DEFAULT_CAT_COLORS[c.name]||hashColor(c.name),
+        color:c.color||savedCatColors[c.name]||DEFAULT_CAT_COLORS[c.name]||hashColor(c.name),
         imageUrl:c.imageUrl
       }));
       const meNode={id:"me",name:"You",type:"me"};
@@ -943,7 +944,9 @@ function MainApp(){
   }
   function changeCategoryColor(id, color) {
     setNodes(prev=>prev.map(n=>n.id===id?{...n,color}:n));
-    // persist if possible
+    // save to localStorage as reliable fallback
+    try{const saved=JSON.parse(localStorage.getItem("catColors")||"{}");saved[id]=color;localStorage.setItem("catColors",JSON.stringify(saved));}catch(e){}
+    // also try to persist to backend
     callBackend("updateCategory",{id,color}).catch(()=>{});
   }
 
