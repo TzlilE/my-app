@@ -1004,6 +1004,7 @@ function MainApp(){
         </div>
         {/* Edit mode toggle */}
         <button onClick={()=>{setEditMode(e=>!e);setEditSheetNode(null);}} style={{width:34,height:34,borderRadius:10,background:editMode?"#FAE0E0":P.surface,border:`1.5px solid ${editMode?P.youStroke:P.border}`,color:editMode?P.youText:P.muted,fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`,fontWeight:700}}>✎</button>
+        {!editMode&&centerNode?.type==="person"&&<button onClick={()=>setActiveCardId(centerNode.id)} style={{width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.muted,fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`}}>👤</button>}
         {!editMode&&<button onClick={()=>setAddModalCenter(centerNode||nodes.find(n=>n.id==="me"))} style={{width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.text,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`}}>+</button>}
         {!editMode&&isHome&&<button onClick={()=>setShowAddCategory(true)} style={{width:34,height:34,borderRadius:10,background:P.surface,border:`1.5px solid ${P.border}`,color:P.muted,fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 1px 4px ${P.shadow}`}}>⊕</button>}
       </div>
