@@ -908,6 +908,7 @@ function MainApp(){
       if(node.type==="person"){setActiveCardId(node.id);return;}
       setEditSheetNode(node);return;
     }
+    if(node.type==="person"){setActiveCardId(node.id);return;}
     setNavStack(s=>[...s,centerId]);setCenterId(node.id);setActiveCardId(null);setShowMeCard(false);
   }
   function onCenterTap(node){if(node.id==="me"){setShowMeCard(true);return;}if(node.type==="person"){setActiveCardId(node.id);}}
