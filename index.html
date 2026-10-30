@@ -357,8 +357,9 @@ function Graph({centerId,allNodes,allLinks,onNodeTap,onCenterTap,width,height,tw
         const color=nodeMainColor(n,allLinks,allNodes);
         const scale=pulseScale[n.id]||1;
         return(
-          <g key={n.id} transform={`translate(${p.x},${p.y}) scale(${scale})`} style={{cursor:isCenter?"default":"pointer"}}
-            onClick={()=>editMode&&!isCenter?onEditNode(n):isCenter?onCenterTap(n):onNodeTap(n)}>
+          <g key={n.id} transform={`translate(${p.x},${p.y}) scale(${scale})`} style={{cursor:isCenter&&n.type==="person"?"pointer":isCenter?"default":"pointer"}}
+            onClick={()=>editMode&&!isCenter?onEditNode(n):isCenter?onCenterTap(n):onNodeTap(n)}
+            onTouchEnd={e=>{e.preventDefault();if(editMode&&!isCenter)onEditNode(n);else if(isCenter)onCenterTap(n);else onNodeTap(n);}}>
             {isSelected&&<circle r={r+7} fill={P.selectedLight} stroke={P.selected} strokeWidth={1.5}/>}
             <Avatar node={n} r={r} color={color} isCenter={isCenter} isSelected={isSelected}/>
             {!isL2&&<text y={r+16} textAnchor="middle" fontSize={isCenter?12:10} fontWeight={isCenter?"700":"500"} fill={P.text} style={{pointerEvents:"none",userSelect:"none"}}>{n.name.split(" ")[0]}</text>}
