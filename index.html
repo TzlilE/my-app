@@ -858,7 +858,8 @@ function MainApp(){
     setLoading(true);setLoadError(null);
     try{
       const data=await callBackend("getAllData");
-      const people=(data.people||[]).map(p=>({...p,about:p.about||[],customValues:p.customValues||{},importantFieldIds:p.importantFieldIds||[],photo:p.imageUrl||null}));
+      const seenNames=new Set();
+      const people=(data.people||[]).map(p=>({...p,about:p.about||[],customValues:p.customValues||{},importantFieldIds:p.importantFieldIds||[],photo:p.imageUrl||null})).filter(p=>{const key=p.name?.trim().toLowerCase();if(!key||seenNames.has(key))return false;seenNames.add(key);return true;});
       const cats=(data.categories||[]).map(c=>({
         id:c.name,name:c.name,type:"category",
         color:c.color||DEFAULT_CAT_COLORS[c.name]||hashColor(c.name),
