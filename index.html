@@ -76,6 +76,22 @@ const P = {
   selectedLight:"#D9C3F433",
 };
 
+// Relationship types with line colors
+const CONN_TYPES = [
+  {label:"Friend",    color:"#B27CDB"},
+  {label:"Spouse",    color:"#F39393"},
+  {label:"Partner",   color:"#EBA076"},
+  {label:"Child",     color:"#B9D4EC"},
+  {label:"Parent",    color:"#EBA076"},
+  {label:"Sibling",   color:"#90C29E"},
+  {label:"Colleague", color:"#F5D982"},
+];
+function connColor(type){
+  if(!type)return null;
+  const t=CONN_TYPES.find(c=>c.label.toLowerCase()===type.toLowerCase());
+  return t?t.color:null;
+}
+
 // 16-color palette swatches for category picker
 const CAT_PALETTE = [
   "#B9D4EC","#B27CDB","#D9C3F4","#F39393",
@@ -331,7 +347,8 @@ function Graph({centerId,allNodes,allLinks,onNodeTap,onCenterTap,width,height,tw
         const dx=tp.x-sp.x,dy=tp.y-sp.y;const dist=Math.sqrt(dx*dx+dy*dy)||1;
         const x1=sp.x+(dx/dist)*sr,y1=sp.y+(dy/dist)*sr;
         const x2=tp.x-(dx/dist)*tr,y2=tp.y-(dy/dist)*tr;
-        return<line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={isL2?P.dim:P.link} strokeWidth={isL2?0.7:1.2} strokeOpacity={isL2?0.3:0.55} strokeLinecap="round"/>;
+        const lc=connColor(l.type);
+        return<line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={isL2?P.dim:(lc||P.link)} strokeWidth={isL2?0.7:1.4} strokeOpacity={isL2?0.3:0.65} strokeLinecap="round"/>;
       })}
       {[...neighborNodes.filter(n=>secondLevelIds.has(n.id)),...neighborNodes.filter(n=>!secondLevelIds.has(n.id))].map(n=>{
         const p=positions[n.id];if(!p)return null;
@@ -470,7 +487,7 @@ function PersonCard({person,allNodes,allLinks,fieldDefs,onClose,onNavigate,onUpd
         <div style={secLabel}>About</div>
         {aboutSorted.length===0&&<div style={{fontSize:13,color:P.dim,marginBottom:12}}>No entries yet</div>}
         {aboutSorted.map((e,i)=><div key={i} style={{display:"flex",gap:10,paddingBottom:10}}><div style={{width:7,height:7,borderRadius:"50%",background:pColor,marginTop:5,flexShrink:0,opacity:i===0?1:0.5}}/><div><div style={{fontSize:11,color:P.muted,marginBottom:2}}>{formatDate(e.date)}</div><div style={{fontSize:14,color:P.text}}>{e.text}</div></div></div>)}
-        {conns.length>0&&<><div style={secLabel}>Connections</div><div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>{conns.map((c,i)=><button key={i} onClick={()=>onNavigate(c.node.id)} style={{display:"flex",alignItems:"center",gap:7,background:P.inputBg,border:`1.5px solid ${P.border}`,borderRadius:20,padding:"6px 12px",fontSize:13,color:P.text,cursor:"pointer"}}><div style={{width:18,height:18,borderRadius:"50%",background:nodeMainColor(c.node,allLinks,allNodes),display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:"white"}}>{c.node.name[0]}</div>{c.node.name.split(" ")[0]}<span style={{color:P.muted,fontSize:11}}>{c.type}</span></button>)}</div></>}
+        {conns.length>0&&<><div style={secLabel}>Connections</div><div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>{conns.map((c,i)=>{const lc=connColor(c.type);return(<button key={i} onClick={()=>onNavigate(c.node.id)} style={{display:"flex",alignItems:"center",gap:7,background:P.inputBg,border:`1.5px solid ${lc||P.border}`,borderRadius:20,padding:"6px 12px",fontSize:13,color:P.text,cursor:"pointer"}}><div style={{width:18,height:18,borderRadius:"50%",background:nodeMainColor(c.node,allLinks,allNodes),display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:"white"}}>{c.node.name[0]}</div>{c.node.name.split(" ")[0]}{c.type&&<span style={{color:lc||P.muted,fontSize:11,fontWeight:600}}>{c.type}</span>}</button>);})}</div></>}
         {conns.length===0&&aboutSorted.length===0&&<div style={{textAlign:"center",padding:"16px 0",color:P.dim,fontSize:13}}>No connections yet — tap Edit to start</div>}
         <button onClick={onClose} style={{...pbtn("secondary"),width:"100%",textAlign:"center"}}>Close</button>
       </>)}
@@ -482,7 +499,7 @@ function PersonCard({person,allNodes,allLinks,fieldDefs,onClose,onNavigate,onUpd
         {[...draft.about].sort((a,b)=>new Date(b.date)-new Date(a.date)).map((e,i)=><div key={i} style={{display:"flex",gap:10,paddingBottom:10,alignItems:"flex-start"}}><div style={{width:7,height:7,borderRadius:"50%",background:pColor,marginTop:5,flexShrink:0}}/><div style={{flex:1}}><div style={{fontSize:11,color:P.muted,marginBottom:2}}>{formatDate(e.date)}</div><div style={{fontSize:14,color:P.text}}>{e.text}</div></div><button onClick={()=>setDraft(d=>({...d,about:d.about.filter(x=>x!==e)}))} style={{background:"none",border:"none",color:P.muted,fontSize:16,cursor:"pointer",padding:"0 4px"}}>×</button></div>)}
         {!showAddAbout?<button onClick={()=>setShowAddAbout(true)} style={{...dashedBtn,marginBottom:12}}>+ Add about entry</button>:<div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}><input type="date" value={newAboutDate} onChange={e=>setNewAboutDate(e.target.value)} style={inp}/><input value={newAboutText} onChange={e=>setNewAboutText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addAbout()} placeholder="What happened..." autoFocus style={inp}/><div style={{display:"flex",gap:8}}><button onClick={addAbout} style={{...pbtn("primary"),flex:1}}>Save</button><button onClick={()=>setShowAddAbout(false)} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
         <div style={secLabel}>Connections</div>
-        {!showAddConn?<button onClick={()=>setShowAddConn(true)} style={{...dashedBtn,marginBottom:12}}>+ Add connection</button>:<div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}><input value={connName} onChange={e=>{setConnName(e.target.value);setConnMatchId(null);}} placeholder="Type a name..." autoFocus style={inp}/>{connMatches.map(m=><button key={m.id} onClick={()=>{setConnMatchId(m.id);setConnName(m.name);}} style={{textAlign:"left",...pbtn("secondary"),padding:"8px 12px"}}>{m.name}</button>)}{connMatchId&&<input value={connType} onChange={e=>setConnType(e.target.value)} placeholder="Relationship type" style={inp}/>}<div style={{display:"flex",gap:8}}><button onClick={()=>{if(connMatchId&&connType.trim()){onUpdate(person.id,{_newConn:{target:connMatchId,type:connType.trim()}});setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}}} disabled={!connMatchId||!connType.trim()} style={{...pbtn("primary"),flex:1,opacity:!connMatchId||!connType.trim()?0.4:1}}>Save</button><button onClick={()=>{setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
+        {!showAddConn?<button onClick={()=>setShowAddConn(true)} style={{...dashedBtn,marginBottom:12}}>+ Add connection</button>:<div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:8}}><input value={connName} onChange={e=>{setConnName(e.target.value);setConnMatchId(null);}} placeholder="Type a name..." autoFocus style={inp}/>{connMatches.map(m=><button key={m.id} onClick={()=>{setConnMatchId(m.id);setConnName(m.name);}} style={{textAlign:"left",...pbtn("secondary"),padding:"8px 12px"}}>{m.name}</button>)}{connMatchId&&<select value={connType} onChange={e=>setConnType(e.target.value)} style={{...inp,color:connType?P.text:P.muted}}><option value="" disabled>Relationship type…</option>{CONN_TYPES.map(c=><option key={c.label} value={c.label}>{c.label}</option>)}</select>}<div style={{display:"flex",gap:8}}><button onClick={()=>{if(connMatchId&&connType.trim()){onUpdate(person.id,{_newConn:{target:connMatchId,type:connType.trim()}});setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}}} disabled={!connMatchId||!connType.trim()} style={{...pbtn("primary"),flex:1,opacity:!connMatchId||!connType.trim()?0.4:1}}>Save</button><button onClick={()=>{setShowAddConn(false);setConnName("");setConnType("");setConnMatchId(null);}} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
         {!showDelConfirm?<button onClick={()=>setShowDelConfirm(true)} style={{...pbtn("danger"),width:"100%",textAlign:"center",marginTop:8}}>Delete person</button>:<div style={{marginTop:8,border:`1.5px solid ${P.danger}40`,borderRadius:14,padding:14}}><div style={{fontSize:14,marginBottom:12,color:P.text}}>Remove {person.name}?</div><div style={{display:"flex",gap:8}}><button onClick={()=>onDelete(person.id)} style={{...pbtn("danger"),flex:1}}>Yes, delete</button><button onClick={()=>setShowDelConfirm(false)} style={{...pbtn("secondary"),flex:1}}>Cancel</button></div></div>}
       </>)}
     </div>
